@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 59';
+      const APP_UPDATE_LABEL = 'Atualização nº 60';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -1793,6 +1793,39 @@
       let fleetSelectedKey = '';
       let costsVehicleId = '';
       let costsLoadToken = 0;
+      function fleetEntryConsumption(rows) {
+        const metrics=new Map(),byVehicle=new Map();
+        const number=v=>v===null||v===undefined||v===''?null:Number.isFinite(Number(v))?Number(v):null;
+        for(const row of new Map(rows.map(r=>[r.id,r])).values()){
+          metrics.set(row.id,{km:null,dieselKm:null,dieselAverage:null,arlaKm:null,arlaAverage:null});
+          if(!row.vehicle_id||(row.subject_vehicle_id&&row.subject_vehicle_id!==row.vehicle_id))continue;
+          if(!byVehicle.has(row.vehicle_id))byVehicle.set(row.vehicle_id,[]);
+          byVehicle.get(row.vehicle_id).push(row);
+        }
+        for(const list of byVehicle.values()){
+          list.sort((a,b)=>String(a.entry_date||'').localeCompare(String(b.entry_date||''))||String(a.created_at||'').localeCompare(String(b.created_at||''))||String(a.id).localeCompare(String(b.id)));
+          let diesel=null,arla=null,previousReading=null;
+          for(const row of list){
+            const metric=metrics.get(row.id),odo=number(row.odometer),liters=number(row.liters),arlaLiters=number(row.arla_liters);
+            if(odo!==null&&odo>=0){if(previousReading!==null&&odo>=previousReading)metric.km=odo-previousReading;previousReading=odo;}
+            if(row.kind!=='fuel')continue;
+            if(diesel!==null&&odo!==null&&odo>=0&&number(diesel.odometer)!==null&&Number(diesel.odometer)>=0&&odo>Number(diesel.odometer)&&liters>0){metric.dieselKm=odo-Number(diesel.odometer);metric.dieselAverage=metric.dieselKm/liters;}
+            diesel=row;
+            if(row.arla_liters!==null&&row.arla_liters!==undefined){
+              if(arla!==null&&odo!==null&&odo>=0&&number(arla.odometer)!==null&&Number(arla.odometer)>=0&&odo>Number(arla.odometer)&&arlaLiters>0){metric.arlaKm=odo-Number(arla.odometer);metric.arlaAverage=metric.arlaKm/arlaLiters;}
+              arla=row;
+            }
+          }
+        }
+        return metrics;
+      }
+      function openFleetLinkPicker() {
+        if(!canAccess('vehicles'))return;
+        const trucks=readRecords('vehicles').filter(v=>v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v)).sort(compareVehiclePlates);
+        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="fleetLinkTitle"><div class="modal-head"><h2 id="fleetLinkTitle">Atrelar veículo / motorista</h2><button type="button" class="close-button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="fleetLinkPicker"><div class="field"><label for="fleetLinkVehicle">Veículo *</label><select id="fleetLinkVehicle" required><option value="">Selecione a placa</option>'+trucks.map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate||'Sem placa')+'</option>').join('')+'</select></div><div class="modal-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button type="submit" class="small-primary">Selecionar motoristas</button></div></form></section></div>';
+        $('#fleetLinkPicker').onsubmit=event=>{event.preventDefault();const id=$('#fleetLinkVehicle').value;if(trucks.some(v=>v.id===id))openVehicleDriversModal(id,renderVehicleCosts);};
+        bindModalClose();
+      }
       let fleetQuickMonth = '';
       let fleetCostsPage = {mode:'summary',driverKey:''};
       function quickFleetDistance(rows) {
@@ -1882,15 +1915,17 @@
           }));
           const summaryPage=inFleet && fleetCostsPage.mode==='summary';
           const driverPage=inFleet && fleetCostsPage.mode==='driver';
-          const driverRows=driverPage?rows.filter(r=>fleetDriverKey(r)===fleetCostsPage.driverKey):rows;
+          const vehiclePage=inFleet&&fleetCostsPage.mode==='vehicle';
+          const driverRows=vehiclePage?rows.filter(r=>r.vehicle_id===fleetCostsPage.vehicleId):driverPage?rows.filter(r=>fleetDriverKey(r)===fleetCostsPage.driverKey):rows;
+          const entryMetrics=fleetEntryConsumption(rows);
           const driverName=vehicleDriverNames.find(d=>d.id===fleetCostsPage.driverKey)?.name||driverRows[0]?.driverName||'Motorista';
           const nowParts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit'}).formatToParts(new Date());
           const currentMonth=nowParts.find(p=>p.type==='year').value+'-'+nowParts.find(p=>p.type==='month').value;
           const monthlyControls=summaryPage?'<div class="field" style="max-width:230px;margin:12px 0"><label for="fleetAverageMonth">Mês da média</label><input id="fleetAverageMonth" type="month" value="'+(fleetQuickMonth||currentMonth)+'"></div><p class="form-hint">Médias mensais: (hodômetro do último abastecimento − primeiro do mês) ÷ todos os litros do produto no mês, incluindo o primeiro. Diesel e ARLA são separados. Só entram veículos com dois abastecimentos válidos do produto. Valores financeiros, KM total e custo por KM continuam acumulados. Custo por KM = todos os gastos ÷ KM total. Quilometragem considera leituras do mesmo caminhão e não duplica gastos/leituras de carretas.</p>':'';
           const summaryHead='<tr><th>Motorista</th><th>Placas vinculadas / histórico</th>'+Object.entries(fleetKinds).map(([key,label])=>'<th>'+safe(label)+'</th>').join('')+'<th>Total de custos</th><th>Saldo</th><th>KM total rodado</th><th>Custo por KM</th><th>Registros</th><th>Média diesel do mês</th><th>Média ARLA do mês</th><th>Detalhes</th></tr>';
-          const selectedPlate = vehicles.find(vehicle => vehicle.id === selectedVehicleId)?.plate;
-          $('#mainContent').innerHTML = (inFleet ? (summaryPage?'':'<button class="back-button" id="backFleetSummary">Voltar ao resumo da Frota</button>') : '<button class="back-button" data-action="open-list" data-registry="vehicles">' + icons.arrow + ' Voltar para veículos</button>') + '<div class="page-heading"><div><h1>' + (inFleet ? (summaryPage?'Resumo por motorista':driverPage?'Lançamentos de '+safe(driverName):'Últimos lançamentos') : 'Custos de lançamentos (motorista)') + '</h1><p>' + (summaryPage?'Totais acumulados por motorista, separados por tipo de lançamento.':selectedPlate ? 'Veículo ' + safe(selectedPlate) : 'Lançamentos em ordem do mais recente para o mais antigo.') + '</p></div>'+(inFleet?'<button id="openFleetDashboard" class="secondary-button">Dashboard da Frota</button>':'')+'<button id="refreshVehicleCosts" class="small-primary">Atualizar</button></div><div id="vehicleCostsTotals" class="stats-grid"></div>' + (inFleet ? '<div class="employee-row-actions" style="margin:16px 0"><button id="newManagedEntry" class="small-primary">Incluir lançamento</button><button id="latestFleetEntries" class="secondary-button">Últimos lançamentos</button></div>' : '') + monthlyControls + '<div class="toolbar"><label class="search-box">' + icons.search + '<input id="vehicleCostsSearch" type="search" placeholder="Buscar motorista ou placa" aria-label="Buscar motorista ou placa"></label><select id="vehicleCostsKind" aria-label="Tipo de lançamento"><option value="">Todos os tipos</option>' + Object.entries(fleetKinds).map(([key,label]) => '<option value="' + key + '">' + safe(label) + '</option>').join('') + '</select></div><div class="table-card"><div class="table-wrap"><table><thead>'+(summaryPage?summaryHead:'<tr><th>Data</th><th>Motorista</th><th>Placa do veículo</th><th>Placa da carreta</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th>Placa do lançamento</th>' + (inFleet ? '<th>Ações</th>' : '') + '</tr>')+'</thead><tbody id="vehicleCostsBody"></tbody></table></div></div>';
-          let selectedFleetOption = driverPage?{driverId:fleetCostsPage.driverKey}:null;
+          const selectedPlate = vehicles.find(vehicle => vehicle.id === (vehiclePage?fleetCostsPage.vehicleId:selectedVehicleId))?.plate;
+          $('#mainContent').innerHTML = (inFleet ? (summaryPage?'':'<button type="button" class="small-primary" id="backFleetSummary" style="margin-bottom:16px">← Visualização rápida</button>') : '<button class="back-button" data-action="open-list" data-registry="vehicles">' + icons.arrow + ' Voltar para veículos</button>') + '<div class="page-heading"><div><h1>' + (inFleet ? (summaryPage?'Resumo por motorista':driverPage?'Lançamentos de '+safe(driverName):vehiclePage?'Lançamentos do veículo '+safe(selectedPlate||''):'Últimos lançamentos') : 'Custos de lançamentos (motorista)') + '</h1><p>' + (summaryPage?'Totais acumulados por motorista, separados por tipo de lançamento.':selectedPlate ? 'Veículo ' + safe(selectedPlate) : 'Lançamentos em ordem do mais recente para o mais antigo.') + '</p></div>'+(inFleet?'<button id="openFleetDashboard" class="secondary-button">Dashboard da Frota</button>':'')+'<button id="refreshVehicleCosts" class="small-primary">Atualizar</button></div><div id="vehicleCostsTotals" class="stats-grid"></div>' + (inFleet ? '<div class="employee-row-actions" style="margin:16px 0"><button id="newManagedEntry" class="small-primary">Incluir lançamento</button><button id="latestFleetEntries" class="secondary-button">Últimos lançamentos</button><button id="fleetLinkAccess" class="secondary-button">Atrelar veículo / motorista</button></div>' : '') + monthlyControls + '<div class="toolbar"><label class="search-box">' + icons.search + '<input id="vehicleCostsSearch" type="search" placeholder="Buscar motorista ou placa" aria-label="Buscar motorista ou placa"></label><select id="vehicleCostsKind" aria-label="Tipo de lançamento"><option value="">Todos os tipos</option>' + Object.entries(fleetKinds).map(([key,label]) => '<option value="' + key + '">' + safe(label) + '</option>').join('') + '</select></div><div class="table-card"><div class="table-wrap"><table><thead>'+(summaryPage?summaryHead:'<tr><th>Data</th><th>Motorista</th><th>Placa do veículo</th><th>Placa da carreta</th><th>Tipo</th><th>Hodômetro</th><th>KM rodado</th><th>KM rodado diesel</th><th>Diesel (L)</th><th>Diesel (R$)</th><th>Média diesel (km/L)</th><th>KM rodado ARLA</th><th>ARLA (L)</th><th>ARLA (R$)</th><th>Média ARLA (km/L)</th><th>Descrição</th><th>Valor total</th><th>Placa do lançamento</th>' + (inFleet ? '<th>Ações</th>' : '') + '</tr>')+'</thead><tbody id="vehicleCostsBody"></tbody></table></div></div>';
+          let selectedFleetOption = vehiclePage?{vehicleId:fleetCostsPage.vehicleId}:driverPage?{driverId:fleetCostsPage.driverKey}:null;
           const selectionOptions = inFleet ? fleetSelectionOptions(rows,vehicles,vehicleDriverNames) : [];
           const update = () => {
             const search = $('#vehicleCostsSearch').value.trim().toLocaleLowerCase('pt-BR');
@@ -1909,20 +1944,34 @@
                 const km=quickFleetDistance(list);
                 return '<td>'+km.toLocaleString('pt-BR',{maximumFractionDigits:2})+' km</td><td>'+(km>0?formatBRL(cost/km):'Dados insuficientes')+'</td>';
               };
+              const vehicleButtons=g=>{
+                const ids=new Set(vehicles.filter(v=>Array.isArray(v.driverIds)&&v.driverIds.includes(g.key)).map(v=>v.id));
+                rows.filter(r=>fleetDriverKey(r)===g.key).forEach(r=>ids.add(r.vehicle_id));
+                const available=vehicles.filter(v=>ids.has(v.id)&&v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v));
+                return available.map(v=>'<div class="employee-row-actions" style="margin-bottom:6px"><span>'+safe(v.plate||'Sem placa')+'</span><button type="button" class="row-action edit" data-fleet-vehicle="'+safe(v.id)+'" aria-label="Abrir lançamentos do veículo '+safe(v.plate||'')+'">+</button><button type="button" class="row-action edit" data-fleet-link="'+safe(v.id)+'">Atrelar</button></div>').join('')||safe([...g.plates].join(' · ')||'Sem placa vinculada');
+              };
               const moneyCells=g=>Object.keys(fleetKinds).map(k=>'<td>'+formatBRL(g.totals[k]||0)+'</td>').join('')+'<td>'+formatBRL(g.cost)+'</td><td>'+formatBRL(g.revenue-g.cost)+'</td>';
               const total={totals:Object.fromEntries(Object.keys(fleetKinds).map(k=>[k,0])),cost:0,revenue:0,count:0};
               summaryRows.forEach(g=>{Object.keys(fleetKinds).forEach(k=>total.totals[k]+=g.totals[k]||0);total.cost+=g.cost;total.revenue+=g.revenue;total.count+=g.count;});
-              $('#vehicleCostsBody').innerHTML=summaryRows.length?summaryRows.map(g=>'<tr><td><strong>'+safe(g.name)+'</strong></td><td>'+safe([...g.plates].join(' · ')||'Sem placa vinculada')+'</td>'+moneyCells(g)+distanceCells(rows.filter(r=>fleetDriverKey(r)===g.key),g.cost)+'<td>'+g.count+'</td>'+averageCells(rows.filter(r=>fleetDriverKey(r)===g.key))+'<td><button class="row-action edit" data-fleet-driver="'+safe(g.key)+'">Ver lançamentos</button></td></tr>').join('')+'<tr><td><strong>Total</strong></td><td></td>'+moneyCells(total)+distanceCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))),total.cost)+'<td>'+total.count+'</td>'+averageCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))))+'<td></td></tr>':'<tr><td colspan="17">Nenhum motorista encontrado.</td></tr>';
+              $('#vehicleCostsBody').innerHTML=summaryRows.length?summaryRows.map(g=>'<tr><td><strong>'+safe(g.name)+'</strong></td><td>'+vehicleButtons(g)+'</td>'+moneyCells(g)+distanceCells(rows.filter(r=>fleetDriverKey(r)===g.key),g.cost)+'<td>'+g.count+'</td>'+averageCells(rows.filter(r=>fleetDriverKey(r)===g.key))+'<td><button class="row-action edit" data-fleet-driver="'+safe(g.key)+'">Ver lançamentos</button></td></tr>').join('')+'<tr><td><strong>Total</strong></td><td></td>'+moneyCells(total)+distanceCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))),total.cost)+'<td>'+total.count+'</td>'+averageCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))))+'<td></td></tr>':'<tr><td colspan="17">Nenhum motorista encontrado.</td></tr>';
               return;
             }
-            $('#vehicleCostsBody').innerHTML = filtered.length ? filtered.map(row => '<tr><td>' + safe(row.entry_date?.split('-').reverse().join('/') || '—') + '</td><td><strong>' + safe(row.driverName) + '</strong></td><td>' + safe(row.plate) + '</td><td>' + safe(row.trailerPlate || '—') + '</td><td>' + safe(fleetKinds[row.kind] || row.kind) + '</td><td>' + safe(row.description || '—') + '</td><td>' + formatBRL(row.amount) + (row.kind==='fuel'?'<span class="table-sub">Diesel: '+formatBRL(Number(row.amount)-Number(row.arla_amount||0))+' · '+Number(row.liters||0).toLocaleString('pt-BR')+' L'+(row.arla_liters?'<br>ARLA: '+formatBRL(row.arla_amount)+' · '+Number(row.arla_liters).toLocaleString('pt-BR')+' L':'')+'</span>':'') + '</td><td>' + safe(row.subject_plate || row.plate) + '</td>' + (inFleet ? '<td><div class="employee-row-actions"><button class="row-action edit" data-managed-edit="' + safe(row.id) + '">Editar</button><button class="row-action delete" data-managed-delete="' + safe(row.id) + '">Excluir</button></div></td>' : '') + '</tr>').join('') : '<tr><td colspan="' + (inFleet ? '9' : '8') + '"><div class="empty-state"><strong>Nenhum lançamento encontrado</strong></div></td></tr>';
+            const num=value=>value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('pt-BR',{maximumFractionDigits:2});
+            $('#vehicleCostsBody').innerHTML=filtered.length?filtered.map(row=>{
+              const m=entryMetrics.get(row.id)||{},fuel=row.kind==='fuel',arla=fuel&&row.arla_liters!==null&&row.arla_liters!==undefined;
+              return '<tr><td>'+safe(row.entry_date?.split('-').reverse().join('/')||'—')+'</td><td><strong>'+safe(row.driverName)+'</strong></td><td>'+safe(row.plate)+'</td><td>'+safe(row.trailerPlate||'—')+'</td><td>'+safe(fleetKinds[row.kind]||row.kind)+'</td><td>'+num(row.odometer)+'</td><td>'+num(m.km)+'</td><td>'+num(m.dieselKm)+'</td><td>'+(fuel?num(row.liters):'—')+'</td><td>'+(fuel?formatBRL(Number(row.amount)-Number(row.arla_amount||0)):'—')+'</td><td>'+num(m.dieselAverage)+'</td><td>'+num(m.arlaKm)+'</td><td>'+(arla?num(row.arla_liters):'—')+'</td><td>'+(arla?formatBRL(row.arla_amount):'—')+'</td><td>'+num(m.arlaAverage)+'</td><td>'+safe(row.description||'—')+'</td><td>'+formatBRL(row.amount)+'</td><td>'+safe(row.subject_plate||row.plate)+'</td>'+(inFleet?'<td><div class="employee-row-actions"><button class="row-action edit" data-managed-edit="'+safe(row.id)+'">Editar</button><button class="row-action delete" data-managed-delete="'+safe(row.id)+'">Excluir</button></div></td>':'')+'</tr>';
+            }).join(''):'<tr><td colspan="'+(inFleet?'19':'18')+'">Nenhum lançamento encontrado.</td></tr>';
           };
           if(inFleet){
             $('#openFleetDashboard').onclick=()=>renderView('fleetDashboard');
             $('#newManagedEntry').onclick=()=>openManagedFleetEntry(selectedFleetOption);
+            $('#fleetLinkAccess').onclick=openFleetLinkPicker;
             $('#latestFleetEntries').onclick=()=>{fleetCostsPage={mode:'latest',driverKey:''};renderVehicleCosts();};
             if(!summaryPage)$('#backFleetSummary').onclick=()=>{fleetCostsPage={mode:'summary',driverKey:''};renderVehicleCosts();};
             $('#vehicleCostsBody').onclick=async event=>{
+              const vehicleLink=event.target.closest('[data-fleet-vehicle]'),attach=event.target.closest('[data-fleet-link]');
+              if(vehicleLink){fleetCostsPage={mode:'vehicle',vehicleId:vehicleLink.dataset.fleetVehicle};await renderVehicleCosts();return;}
+              if(attach){openVehicleDriversModal(attach.dataset.fleetLink,renderVehicleCosts);return;}
               const driverLink=event.target.closest('[data-fleet-driver]');
               if(driverLink){fleetCostsPage={mode:'driver',driverKey:driverLink.dataset.fleetDriver};await renderVehicleCosts();return;}
               const edit=event.target.closest('[data-managed-edit]'),remove=event.target.closest('[data-managed-delete]');
@@ -1942,7 +1991,7 @@
           update();
         } catch (error) {
           if (token !== costsLoadToken || currentView !== expectedView) return;
-          $('#mainContent').innerHTML = (inFleet ? '' : '<button class="back-button" data-action="open-list" data-registry="vehicles">Voltar para veículos</button>') + '<div class="empty-state"><strong>' + safe(authErrorMessage(error,'Não foi possível carregar os lançamentos.')) + '</strong><button id="retryVehicleCosts" class="small-primary">Tentar novamente</button></div>';
+          $('#mainContent').innerHTML = (inFleet ? '<button type="button" class="small-primary" data-action="open-fleet-summary">← Visualização rápida</button>' : '<button class="back-button" data-action="open-list" data-registry="vehicles">Voltar para veículos</button>') + '<div class="empty-state"><strong>' + safe(authErrorMessage(error,'Não foi possível carregar os lançamentos.')) + '</strong><button id="retryVehicleCosts" class="small-primary">Tentar novamente</button></div>';
           bindActions();
           $('#retryVehicleCosts').onclick = renderVehicleCosts;
         }
@@ -2275,7 +2324,7 @@
       function linkedTrailerPlates(record) {
         return (Array.isArray(record.trailerIds) ? record.trailerIds : []).map(id => readRecords('vehicles').find(vehicle => vehicle.id === id)?.plate || 'Carreta não disponível');
       }
-      function openVehicleDriversModal(id) {
+      function openVehicleDriversModal(id,onSaved=null) {
         if (!canAccess('vehicles')) { showToast('Seu login não pode editar veículos.'); return; }
         const record = readRecords('vehicles').find(vehicle => vehicle.id === id);
         if (!record) return;
@@ -2318,7 +2367,7 @@
             await saveRecord('vehicles',{...latest,driverIds,trailerIds,updatedAt:new Date().toISOString()});
             $('#modalRoot').innerHTML = '';
             showToast('Motoristas vinculados ao veículo.');
-            renderVehicleTable();
+            if(onSaved)await onSaved();else renderVehicleTable();
           } catch(error) { if ($('#vehicleDriversError')) $('#vehicleDriversError').textContent = authErrorMessage(error,'Não foi possível salvar os vínculos.'); button.disabled = false; }
         };
         bindModalClose();
@@ -2588,6 +2637,7 @@
           const button = event.target.closest('[data-action]');
           if (!button || !$('#mainContent').contains(button)) return;
           const action = button.dataset.action;
+          if(action==='open-fleet-summary')renderView('fleet');
           if (action === 'open-dismissed-employees') renderView('dismissedEmployees');
           if (action === 'view-dismissed-employee') openDismissedEmployeeDetails(button.dataset.id);
           if (action === 'open-birthdays') renderView('birthdays');
