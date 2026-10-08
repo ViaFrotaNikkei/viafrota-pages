@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 54';
+      const APP_UPDATE_LABEL = 'Atualização nº 55';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -1165,10 +1165,13 @@
       function paymentOrdersForView(rows,view) {
         return rows.filter(o => (o.status!=='deleted'||(view==='conferente'&&showDeletedPaymentOrders)) && (view==='conferente' ? o.created_by===activeUser?.id : view==='finance' ? o.status==='approved' : canViewOverview()||o.assigned_reviewer===activeUser?.id));
       }
+      function canReviewPaymentOrder(order,userId=activeUser?.id) {
+        return Boolean(order&&userId&&order.status==='pending'&&order.created_by!==userId&&(order.assigned_reviewer===userId||canViewOverview()));
+      }
       function paymentOperationalCardHtml(order,userId) {
-        const canReview=order.status==='pending'&&order.created_by!==userId&&order.assigned_reviewer===userId;
+        const canReview=canReviewPaymentOrder(order,userId);
         const statusClass=order.status==='pending'?'pending':order.status==='rejected'?'inactive':'';
-        return '<article class="payment-order-card"><div class="payment-order-card-head"><strong>Ordem de pagamento #'+safe(order.number)+'</strong><span class="status-pill '+statusClass+'">'+safe(paymentStatusLabels[order.status])+'</span></div><div class="payment-order-card-grid"><div><span>Data do serviço</span><strong>'+safe(formatPaymentDate(order.service_date))+'</strong></div><div><span>NFe · Placa</span><strong>'+safe(order.nfe)+' · '+safe(order.plate)+'</strong></div><div><span>Beneficiário</span><strong>'+safe(order.beneficiary)+'</strong></div><div><span>Valor a pagar</span><strong>'+formatBRL(order.payment_amount)+'</strong></div><div><span>Serviço</span><strong>'+safe(order.service)+'</strong></div><div><span>Responsável Operacional</span><strong>'+safe(order.assigned_reviewer_name||"—")+'</strong></div></div>'+(order.rejection_reason?'<p class="request-panel-note">Motivo da recusa: '+safe(order.rejection_reason)+'</p>':'')+'<div class="payment-order-card-actions">'+(canReview?'<button type="button" class="secondary-button" data-payment-edit="'+safe(order.id)+'">Editar ordem</button><button type="button" class="small-primary" data-payment-review-intent="approve" data-payment-detail="'+safe(order.id)+'">Aprovar</button><button type="button" class="payment-reject-action" data-payment-review-intent="reject" data-payment-detail="'+safe(order.id)+'">Recusar</button>':'')+'<button type="button" class="row-action edit" data-payment-detail="'+safe(order.id)+'">'+(canReview?'Ver detalhes e histórico':'Ver detalhes')+'</button></div></article>';
+        return '<article class="payment-order-card"><div class="payment-order-card-head"><strong>Ordem de pagamento #'+safe(order.number)+'</strong><span class="status-pill '+statusClass+'">'+safe(paymentStatusLabels[order.status])+'</span></div><div class="payment-order-card-grid"><div><span>Data do serviço</span><strong>'+safe(formatPaymentDate(order.service_date))+'</strong></div><div><span>NFe · Placa</span><strong>'+safe(order.nfe)+' · '+safe(order.plate)+'</strong></div><div><span>Beneficiário</span><strong>'+safe(order.beneficiary)+'</strong></div><div><span>Valor a pagar</span><strong>'+formatBRL(order.payment_amount)+'</strong></div><div><span>Serviço</span><strong>'+safe(order.service)+'</strong></div><div><span>Responsável Operacional</span><strong>'+safe(order.assigned_reviewer_name||"—")+'</strong></div></div>'+(order.rejection_reason?'<p class="request-panel-note">Motivo da recusa: '+safe(order.rejection_reason)+'</p>':'')+'<div class="payment-order-card-actions">'+(canReview?'<button type="button" class="secondary-button" data-payment-edit="'+safe(order.id)+'">Editar ordem</button><button type="button" class="small-primary" data-payment-review-intent="approve" data-payment-detail="'+safe(order.id)+'">Aprovar</button><button type="button" class="payment-reject-action" data-payment-review-intent="reject" data-payment-detail="'+safe(order.id)+'">Recusar</button>':'')+'<button type="button" class="row-action edit" data-payment-detail="'+safe(order.id)+'">'+(canReview?'Ver detalhes e histórico':'Ver detalhes')+'</button></div>'+(order.status==='pending'&&!canReview?'<p class="request-panel-note">'+(order.created_by===userId?'Esta ordem foi criada pelo seu login. A análise deve ser feita por outro responsável.':'A edição e a aprovação são reservadas ao responsável escolhido e ao Master.')+'</p>':'')+'</article>';
       }
       function paymentMoneyValue(value) {
         const text=String(value??'').trim();
@@ -1270,7 +1273,7 @@
           const pending=paymentOrdersCache.filter(o=>o.status==='pending').length;
           const returned=paymentOrdersCache.filter(o=>o.status==='rejected').length;
           const total=paymentOrdersCache.filter(o=>o.status!=='deleted').reduce((sum,o)=>sum+Number(o.payment_amount),0);
-          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Edite ou exclua suas ordens pendentes; ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'Confira os dados e aprove para encaminhar ao Financeiro, ou recuse com um motivo.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
+          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Edite ou exclua suas ordens pendentes; ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'O responsável escolhido e o Master podem editar e aprovar ordens pendentes, ou recusar com um motivo. Não é permitido analisar uma ordem criada pelo próprio login.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
           if(view==='operacional'){
             const cards=paymentOrdersCache.length?'<div class="payment-order-list">'+paymentOrdersCache.map(o=>paymentOperationalCardHtml(o,userId)).join('')+'</div>':'<div class="table-card"><div class="empty-state"><strong>Nenhuma ordem de pagamento</strong><span>As ordens atribuídas a você aparecerão aqui.</span></div></div>';
             $('#mainContent').innerHTML='<div class="page-heading"><div><h1>'+title+'</h1><p>'+description+'</p></div><button id="refreshPaymentOrders" class="secondary-button">Atualizar</button></div><p class="request-panel-note">'+paymentOrdersCache.length+' ordens · '+pending+' aguardando análise · '+returned+' devolvidas · Valor a pagar: '+formatBRL(total)+'</p>'+cards;
@@ -1321,7 +1324,7 @@
       }
       async function openPaymentOrderForm(order,mode='conferente') {
         const operational=mode==='operacional';
-        if(operational ? !canAccess('operacional')||!order||order.status!=='pending'||order.assigned_reviewer!==activeUser?.id||order.created_by===activeUser?.id : !canAccess('conferente')||(order&&(order.created_by!==activeUser?.id||!['pending','rejected'].includes(order.status))))return;
+        if(operational ? !canAccess('operacional')||!canReviewPaymentOrder(order) : !canAccess('conferente')||(order&&(order.created_by!==activeUser?.id||!['pending','rejected'].includes(order.status))))return;
         const token=++paymentFormToken,userId=activeUser.id;
         $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal"><p>Carregando responsáveis do Operacional…</p><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button></section></div>';
         bindActions();
@@ -1381,15 +1384,17 @@
             const payload=paymentOrderData(new FormData(form));
             if(operational)payload.assigned_reviewer=order.assigned_reviewer;
             const client=await getSupabase();
-            const {error}=await client.rpc('manage_payment_order',{p_action:operational?'edit':order?.status==='pending'?'author_edit':order?'resubmit':'submit',p_id:order?.id||null,p_data:payload,p_version:order?.version||null});
+            const {data:savedOrder,error}=await client.rpc('manage_payment_order',{p_action:operational?'edit':order?.status==='pending'?'author_edit':order?'resubmit':'submit',p_id:order?.id||null,p_data:payload,p_version:order?.version||null});
             if(error)throw error;
-            $('#modalRoot').innerHTML='';showToast(operational?'Edição registrada. Continue a análise da ordem.':order?.status==='pending'?'Edição salva e registrada no histórico.':'Ordem enviada ao Operacional.');await renderPaymentOrders(mode);
+            $('#modalRoot').innerHTML='';showToast(operational?'Edição registrada. Revise e confirme a aprovação.':order?.status==='pending'?'Edição salva e registrada no histórico.':'Ordem enviada ao Operacional.');
+            await renderPaymentOrders(mode);
+            if(operational&&savedOrder?.id&&savedOrder?.version)await openPaymentOrderDetail(savedOrder,'operacional','approve');
           }catch(error){if($('#paymentFormError'))$('#paymentFormError').textContent=authErrorMessage(error,'Não foi possível enviar a ordem.');button.disabled=false;}
         };
       }
       async function openPaymentOrderDetail(order,view,reviewIntent) {
         if(!order || !canAccess(view))return;
-        const canReview=view==='operacional'&&order.status==='pending'&&order.created_by!==activeUser?.id&&order.assigned_reviewer===activeUser?.id;
+        const canReview=view==='operacional'&&canReviewPaymentOrder(order);
         $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="paymentDetailTitle"><div class="modal-head"><h2 id="paymentDetailTitle">Ordem de pagamento #'+safe(order.number)+'</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div>'+paymentDetailsHtml(order)+'<h3>Histórico</h3><div id="paymentOrderHistory">Carregando…</div>'+(canReview?'<button id="editOperationalPaymentOrder" class="secondary-button" type="button">Editar ordem</button><form id="paymentReviewForm"><p class="request-panel-note">ROM, MIN e ND são opcionais e serão enviados ao Financeiro junto com a aprovação.</p><div class="form-row">'+['rom','min','nd'].map(name=>'<div class="field"><label for="payment-review-'+name+'">'+name.toUpperCase()+' (opcional)</label><input id="payment-review-'+name+'" name="'+name+'" type="text" maxlength="100" value="'+safe(order[name]||'')+'"></div>').join('')+'</div><div class="field"><label for="paymentRejectReason">Motivo da recusa (obrigatório ao recusar)</label><textarea id="paymentRejectReason" maxlength="500"></textarea></div><p id="paymentReviewError" class="login-error" role="alert"></p><div class="modal-actions"><button id="rejectOperationalPaymentOrder" class="secondary-button" type="submit" value="reject">Confirmar recusa e devolver</button><button id="approveOperationalPaymentOrder" class="small-primary" type="submit" value="approve">Confirmar aprovação ao Financeiro</button></div></form>':'')+'</section></div>';
         bindActions();
         const root=$('#paymentOrderHistory');
