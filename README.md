@@ -1,13 +1,17 @@
 # ViaFrota — publicação
 
-Aplicativo ViaFrota, Atualização nº 53.
+Aplicativo ViaFrota, **Atualização nº 54**.
 
 Acesse: https://viafrotanikkei.github.io/viafrota-pages/
 
-Este repositório contém somente os arquivos públicos do site. O desenvolvimento, os testes e as migrações ficam no projeto privado ViaFrotaNikkei/viafrota; o banco e os documentos continuam protegidos pela autenticação e RLS do Supabase.
+O mesmo aplicativo está em https://nikkeilogistica.com.br/viafrota/.
 
-Versão do aplicativo publicada a partir do commit 2e971b75d9c87e051484c75f01fb056157791f21 do projeto de desenvolvimento. Os testes da v53 incluem 563 verificações de frontend e 50 de RPC/RLS no Supabase, com rollback dos registros de teste.
+O Conferente pode editar suas ordens pendentes pelo formulário completo e excluir ordens pendentes ou devolvidas, com confirmação e histórico preservado. Mostrar excluídas permite consultar os registros arquivados. Ordens aprovadas permanecem protegidas.
 
-O mesmo aplicativo está em https://nikkeilogistica.com.br/viafrota/. Recuperação de senha e confirmação de e-mail retornam a esse domínio conforme a configuração existente.
+Este repositório contém somente arquivos públicos do site. Desenvolvimento, testes e migrações ficam no projeto privado ViaFrotaNikkei/viafrota; dados e documentos continuam protegidos por autenticação e RLS do Supabase.
 
-GitHub Pages publica a branch main, pasta raiz. Atualizações futuras do aplicativo devem substituir index.html com o artefato validado do projeto privado.
+Artefato validado do commit 6af54b61bfab303b7221a72d1cda1cb6f60c7f33 do projeto de desenvolvimento. Validação: 16 suítes JavaScript com 611 verificações, 39 verificações específicas da v54 e 50 de regressão da v53 via RPC/RLS com rollback. Telas conferidas no navegador com dados simulados, incluindo celular. O index.html é idêntico ao publicado no domínio principal (blob 067087703f2464683d9a33028ab4c92ccdd774e1).
+
+Publicação v54 confirmada no navegador e no workflow de Pages 37819034640. Recuperação de senha e confirmação de e-mail continuam retornando ao domínio principal conforme a configuração existente.
+
+GitHub Pages publica main, pasta raiz. Atualizações futuras devem substituir index.html com o artefato validado do projeto privado.
