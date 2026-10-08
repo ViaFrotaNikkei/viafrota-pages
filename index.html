@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 60';
+      const APP_UPDATE_LABEL = 'Atualização nº 61';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -579,7 +579,7 @@
         vehicleDriverNames = [];
         if (canAccess('vehicles')) jobs.push(client.rpc('vehicle_driver_names').then(({data,error}) => { if(error) throw error; vehicleDriverNames = (data || []).map(driver => ({...driver,name:normalizePersonName(driver.name)})); }));
         if (canAccess('vehicles')) jobs.push(client.from('vehicles').select('*').order('created_at', { ascending: false }).then(({ data, error }) => { if (error) throw error; recordsCache.vehicles = (data || []).map(row => mapDatabaseRecord(row, 'vehicles')); }));
-        if (canAccess('employees')) jobs.push(client.from('employees').select('*').order('created_at', { ascending: false }).then(({ data, error }) => { if (error) throw error; recordsCache.employees = (data || []).map(row => mapDatabaseRecord(row, 'employees')); }));
+        if (canAccess('employees')) jobs.push(fetchEmployeeRecords(client).then(records => { recordsCache.employees=records; }));
         if (canAccess('accessRequests')) jobs.push(client.from('access_requests').select('*').order('created_at', { ascending: false }).then(({ data, error }) => { if (error) throw error; accessRequestsCache = (data || []).map(mapDatabaseRequest); }));
         await Promise.all(jobs);
         const { data: enabled, error: driverError } = await client.rpc('driver_access_enabled');
@@ -965,7 +965,7 @@
         else if (view === 'fleetDashboard') renderFleetDashboard();
         else if (view === 'vehicleCosts') renderVehicleCosts();
         else if (view === 'driverReport') renderDriverReport();
-        else if (view === 'dismissedEmployees') renderList('employees',true);
+        else if (view === 'dismissedEmployees') refreshEmployeeList(true);
         else if (view === 'birthdays') renderBirthdays();
         else if (view === 'home') renderHome();
         else if (view === 'registries') renderRegistries();
@@ -973,6 +973,7 @@
         else if (view === 'accessRequests') renderAccessRequests();
         else if (['conferente','operacional','finance'].includes(view)) renderPaymentOrders(view);
         else if (['fleet', 'driver', 'information', 'usefulContacts'].includes(view)) renderModulePage(view);
+        else if(view==='list'&&registry==='employees')refreshEmployeeList();
         else renderList(registry);
       }
 
@@ -2112,6 +2113,33 @@
         return Number(pending(b))-Number(pending(a)) || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{sensitivity:'base',numeric:true}) || String(a.id||'').localeCompare(String(b.id||''));
       }
 
+      let employeesLoadToken=0;
+      async function fetchEmployeeRecords(client) {
+        const records=[];
+        for(let offset=0;;offset+=500){
+          const {data,error}=await client.from('employees').select('*').order('created_at',{ascending:false}).order('id').range(offset,offset+499);
+          if(error)throw error;
+          records.push(...(data||[]));
+          if(!data||data.length<500)break;
+        }
+        return records.map(row=>mapDatabaseRecord(row,'employees'));
+      }
+      async function refreshEmployeeList(archived=false) {
+        if(!canAccess('employees'))return;
+        const token=++employeesLoadToken,view=currentView,registry=activeRegistry,actor=activeUser?.id;
+        $('#mainContent').innerHTML='<div class="empty-state">Atualizando funcionários…</div>';
+        try{
+          const client=await getSupabase();
+          const records=await fetchEmployeeRecords(client);
+          if(token!==employeesLoadToken||currentView!==view||activeRegistry!==registry||activeUser?.id!==actor)return;
+          recordsCache.employees=records;
+          renderList('employees',archived);
+        }catch(error){
+          if(token!==employeesLoadToken||currentView!==view||activeRegistry!==registry||activeUser?.id!==actor)return;
+          $('#mainContent').innerHTML='<div class="empty-state"><strong>'+safe(authErrorMessage(error,'Não foi possível atualizar os funcionários.'))+'</strong><button class="small-primary" id="retryEmployeeList">Tentar novamente</button><button class="secondary-button" data-action="open-registries">Voltar para cadastros</button></div>';
+          $('#retryEmployeeList').onclick=()=>refreshEmployeeList(archived);bindActions();
+        }
+      }
       function renderList(kind, archived=false) {
         if (kind === 'vehicles') { renderVehicleLookup(); return; }
         if (kind !== 'employees' || !canAccess('employees')) { renderView('registries'); return; }
@@ -2129,8 +2157,9 @@
         $('#mainContent').innerHTML = `
           <button class="back-button" data-action="open-registries">${icons.arrow} Voltar para cadastros</button>
           <div class="page-heading"><div><h1>${title}</h1><p>${archived?'Cadastros preservados com o motivo da demissão. Apenas o Master pode editar.':'Acompanhe as pessoas que fazem parte da sua equipe.'}</p></div><div class="date-chip">${records.length} ${records.length === 1 ? 'registro' : 'registros'}</div></div>
-          <div class="toolbar"><label class="search-box">${icons.search}<input id="recordSearch" type="search" placeholder="Buscar funcionário ou cargo" value="${safe(searchTerm)}"></label>${!archived && (canViewOverview() || fleetClerk) ? `<button class="small-primary" data-action="create-employee-access">${icons.shield} Criar acesso</button>` : ''}${!archived?`<button class="small-primary" data-action="new-record" data-registry="${kind}">${icons.plus} Novo cadastro</button>`:''}</div>
+          <div class="toolbar"><label class="search-box">${icons.search}<input id="recordSearch" type="search" placeholder="Buscar funcionário ou cargo" value="${safe(searchTerm)}"></label><button class="secondary-button" id="refreshEmployeeRecords">Atualizar lista</button>${!archived && (canViewOverview() || fleetClerk) ? `<button class="small-primary" data-action="create-employee-access">${icons.shield} Criar acesso</button>` : ''}${!archived?`<button class="small-primary" data-action="new-record" data-registry="${kind}">${icons.plus} Novo cadastro</button>`:''}</div>
           <div class="table-card"><div class="table-wrap"><table><thead><tr>${headers.map(header => `<th>${header}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+        $('#refreshEmployeeRecords').onclick=()=>refreshEmployeeList(archived);
         $('#recordSearch').addEventListener('input', event => { searchTerm = event.target.value; const cursor = event.target.selectionStart; renderList(kind,archived); $('#recordSearch').focus(); $('#recordSearch').setSelectionRange(cursor, cursor); });
         bindActions();
       }
