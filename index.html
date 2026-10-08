@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 62';
+      const APP_UPDATE_LABEL = 'Atualização nº 63';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -1158,11 +1158,37 @@
           const client=await getSupabase();await loadSuppliers(client);
           if(activeUser?.id!==actor)return;
           const record=suppliersCache.find(s=>s.id===editId);
-          $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="suppliersTitle"><div class="modal-head"><h2 id="suppliersTitle">Cadastro de fornecedores</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="supplierForm"><div class="field"><label for="supplierName">Nome do fornecedor *</label><input id="supplierName" required maxlength="200" value="'+safe(record?.name||'')+'"></div><div class="field"><label for="supplierNickname">Apelido *</label><input id="supplierNickname" required maxlength="100" value="'+safe(record?.nickname||'')+'"></div><p id="supplierError" class="login-error" role="alert"></p><div class="modal-actions"><button class="small-primary" type="submit">'+(record?'Salvar alterações':'Cadastrar fornecedor')+'</button>'+(record?'<button type="button" class="secondary-button" id="supplierNew">Novo fornecedor</button>':'')+'</div></form><div class="table-wrap" style="max-height:300px;overflow:auto;margin-top:18px"><table><thead><tr><th>Apelido</th><th>Nome</th><th></th></tr></thead><tbody id="supplierList">'+(suppliersCache.length?suppliersCache.map(s=>'<tr><td>'+safe(s.nickname)+'</td><td>'+safe(s.name)+'</td><td><button type="button" class="row-action edit" data-supplier-edit="'+safe(s.id)+'">Editar</button></td></tr>').join(''):'<tr><td colspan="3">Nenhum fornecedor cadastrado.</td></tr>')+'</tbody></table></div></section></div>';
+          $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="suppliersTitle"><div class="modal-head"><h2 id="suppliersTitle">Cadastro de fornecedores</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="supplierForm"><div class="field"><label for="supplierCnpj">CNPJ</label><input id="supplierCnpj" maxlength="18" inputmode="numeric" value="'+safe(record?.cnpj||'')+'"><button type="button" class="secondary-button" id="supplierLookup">Consultar CNPJ</button><p id="supplierLookupStatus" role="status" aria-live="polite"></p></div><div class="field"><label for="supplierName">Nome do fornecedor *</label><input id="supplierName" required maxlength="200" value="'+safe(record?.name||'')+'"></div><div class="field"><label for="supplierNickname">Apelido *</label><input id="supplierNickname" required maxlength="100" value="'+safe(record?.nickname||'')+'"></div><div class="field"><label for="supplierAddress">Endereço</label><input id="supplierAddress" maxlength="500" value="'+safe(record?.company_data?.address||'')+'" readonly></div><div class="field"><label for="supplierPhone">Telefone</label><input id="supplierPhone" maxlength="80" value="'+safe(record?.company_data?.phone||'')+'" readonly></div><p id="supplierError" class="login-error" role="alert"></p><div class="modal-actions"><button class="small-primary" type="submit">'+(record?'Salvar alterações':'Cadastrar fornecedor')+'</button>'+(record?'<button type="button" class="secondary-button" id="supplierNew">Novo fornecedor</button>':'')+'</div></form><div class="table-wrap" style="max-height:300px;overflow:auto;margin-top:18px"><table><thead><tr><th>Apelido</th><th>Nome</th><th></th></tr></thead><tbody id="supplierList">'+(suppliersCache.length?suppliersCache.map(s=>'<tr><td>'+safe(s.nickname)+'</td><td>'+safe(s.name)+'</td><td><button type="button" class="row-action edit" data-supplier-edit="'+safe(s.id)+'">Editar</button></td></tr>').join(''):'<tr><td colspan="3">Nenhum fornecedor cadastrado.</td></tr>')+'</tbody></table></div></section></div>';
           const form=$('#supplierForm');
+          let companyData=record?.company_data||{},lookupVersion=0,lookupPending=false,lookedUp=record?.cnpj||'';
+          const cnpjInput=$('#supplierCnpj'),status=$('#supplierLookupStatus');
+          const lookup=async()=>{
+            const cnpj=cnpjInput.value.replace(/\D/g,'');
+            if(cnpj.length!==14){status.textContent='Informe os 14 números do CNPJ.';return;}
+            const version=++lookupVersion;lookupPending=true;status.textContent='Consultando CNPJ…';
+            const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+            try{
+              const response=await fetch('https://brasilapi.com.br/api/cnpj/v1/'+cnpj,{signal:controller.signal});
+              if(!response.ok)throw new Error(response.status===404?'CNPJ não encontrado.':'Consulta indisponível. Tente novamente.');
+              const data=await response.json();
+              if(version!==lookupVersion||$('#supplierForm')!==form||activeUser?.id!==actor)return;
+              if(!data.razao_social)throw new Error('A consulta não retornou o nome do fornecedor.');
+              $('#supplierName').value=String(data.razao_social).slice(0,200);
+              $('#supplierNickname').value=String(data.nome_fantasia||data.razao_social).slice(0,100);
+              companyData={trade_name:data.nome_fantasia||'',address:[data.descricao_tipo_de_logradouro,data.logradouro,data.numero,data.complemento,data.bairro,data.municipio,data.uf,data.cep].filter(Boolean).join(', ').slice(0,500),phone:String(data.ddd_telefone_1||'').slice(0,80),email:data.email||'',status:data.descricao_situacao_cadastral||''};
+              $('#supplierAddress').value=companyData.address;$('#supplierPhone').value=companyData.phone;
+              lookedUp=cnpj;status.textContent='Dados carregados. Confira o apelido antes de salvar.';
+            }catch(error){if(version===lookupVersion&&$('#supplierForm')===form)status.textContent=error.name==='AbortError'?'Consulta demorou. Tente novamente.':error.message;}
+            finally{clearTimeout(timer);if(version===lookupVersion)lookupPending=false;}
+          };
+          cnpjInput.oninput=()=>{lookupVersion++;lookupPending=false;lookedUp='';companyData={};$('#supplierAddress').value='';$('#supplierPhone').value='';$('#supplierName').value='';$('#supplierNickname').value='';const digits=cnpjInput.value.replace(/\D/g,'').slice(0,14);cnpjInput.value=digits;if(digits.length===14)lookup();else status.textContent='Digite o CNPJ para carregar os dados.';};
+          $('#supplierLookup').onclick=lookup;
+
           form.onsubmit=async event=>{
             event.preventDefault();const button=form.querySelector('[type="submit"]');button.disabled=true;
-            const fields={name:$('#supplierName').value.trim(),nickname:$('#supplierNickname').value.trim(),updated_at:new Date().toISOString()};
+            const cnpj=cnpjInput.value.replace(/\D/g,'');
+            if(lookupPending||(cnpj&&lookedUp!==cnpj)){status.textContent='Consulte o CNPJ e aguarde os dados antes de salvar.';button.disabled=false;return;}
+            const fields={cnpj:cnpj||null,company_data:companyData,name:$('#supplierName').value.trim(),nickname:$('#supplierNickname').value.trim(),updated_at:new Date().toISOString()};
             if(!fields.name||!fields.nickname){$('#supplierError').textContent='Informe nome e apelido.';button.disabled=false;return;}
             try{
               const query=record?client.from('suppliers').update(fields).eq('id',record.id):client.from('suppliers').insert(fields);
@@ -1875,7 +1901,7 @@
       function quickFleetDistance(rows) {
         const byVehicle=new Map();
         for(const row of new Map(rows.map(r=>[r.id,r])).values()){
-          if(!row.vehicle_id||(row.subject_vehicle_id&&row.subject_vehicle_id!==row.vehicle_id))continue;
+          if(!row.vehicle_id||(row.kind!=='fuel'&&row.subject_vehicle_id&&row.subject_vehicle_id!==row.vehicle_id))continue;
           if(!byVehicle.has(row.vehicle_id))byVehicle.set(row.vehicle_id,[]);
           byVehicle.get(row.vehicle_id).push(row);
         }
@@ -1971,6 +1997,14 @@
           $('#mainContent').innerHTML = (inFleet ? (summaryPage?'':'<button type="button" class="small-primary" id="backFleetSummary" style="margin-bottom:16px">← Visualização rápida</button>') : '<button class="back-button" data-action="open-list" data-registry="vehicles">' + icons.arrow + ' Voltar para veículos</button>') + '<div class="page-heading"><div><h1>' + (inFleet ? (summaryPage?'Resumo por motorista':driverPage?'Lançamentos de '+safe(driverName):vehiclePage?'Lançamentos do veículo '+safe(selectedPlate||''):'Últimos lançamentos') : 'Custos de lançamentos (motorista)') + '</h1><p>' + (summaryPage?'Totais acumulados por motorista, separados por tipo de lançamento.':selectedPlate ? 'Veículo ' + safe(selectedPlate) : 'Lançamentos em ordem do mais recente para o mais antigo.') + '</p></div>'+(inFleet?'<button id="openFleetDashboard" class="secondary-button">Dashboard da Frota</button>':'')+'<button id="refreshVehicleCosts" class="small-primary">Atualizar</button></div><div id="vehicleCostsTotals" class="stats-grid"></div>' + (inFleet ? '<div class="employee-row-actions" style="margin:16px 0"><button id="newManagedEntry" class="small-primary">Incluir lançamento</button><button id="latestFleetEntries" class="secondary-button">Últimos lançamentos</button><button id="fleetSuppliersAccess" class="secondary-button">Fornecedores</button><button id="quickFleetAccess" class="secondary-button">Visualização rápida</button></div>' : '') + monthlyControls + '<div class="toolbar"><label class="search-box">' + icons.search + '<input id="vehicleCostsSearch" type="search" placeholder="Buscar motorista ou placa" aria-label="Buscar motorista ou placa"></label><select id="vehicleCostsKind" aria-label="Tipo de lançamento"><option value="">Todos os tipos</option>' + Object.entries(fleetKinds).map(([key,label]) => '<option value="' + key + '">' + safe(label) + '</option>').join('') + '</select></div><div class="table-card"><div class="table-wrap"><table><thead>'+(summaryPage?summaryHead:'<tr><th>Data</th><th>Motorista</th><th>Veículo / carreta</th><th>Tipo</th><th>Hodômetro</th><th>KM rodado</th><th>KM rodado diesel</th><th>Diesel (L)</th><th>Diesel (R$)</th><th>Média diesel (km/L)</th><th>KM rodado ARLA</th><th>ARLA (L)</th><th>ARLA (R$)</th><th>Média ARLA (km/L)</th><th>Descrição</th><th>Valor total</th><th>Placa do lançamento</th>' + (inFleet ? '<th>Ações</th>' : '') + '</tr>')+'</thead><tbody id="vehicleCostsBody"></tbody></table></div></div>';
           let selectedFleetOption = vehiclePage?{vehicleId:fleetCostsPage.vehicleId}:driverPage?{driverId:fleetCostsPage.driverKey}:null;
           const selectionOptions = inFleet ? fleetSelectionOptions(rows,vehicles,vehicleDriverNames) : [];
+          const expandedDrivers=new Set();
+          const entryRows=list=>{
+            const num=value=>value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('pt-BR',{maximumFractionDigits:2});
+            return list.length?list.map(row=>{
+              const m=entryMetrics.get(row.id)||{},fuel=row.kind==='fuel',arla=fuel&&row.arla_liters!==null&&row.arla_liters!==undefined;
+              return '<tr><td>'+safe(row.entry_date?.split('-').reverse().join('/')||'—')+'</td><td><strong>'+safe(row.driverName)+'</strong></td><td>'+safe(row.plate)+(row.trailerPlate?'<span class="table-sub">Carreta: '+safe(row.trailerPlate)+'</span>':'')+'</td><td>'+safe(fleetKinds[row.kind]||row.kind)+'</td><td>'+num(row.odometer)+'</td><td>'+num(m.km)+'</td><td>'+num(m.dieselKm)+'</td><td>'+(fuel?num(row.liters):'—')+'</td><td>'+(fuel?formatBRL(Number(row.amount)-Number(row.arla_amount||0)):'—')+'</td><td>'+num(m.dieselAverage)+'</td><td>'+num(m.arlaKm)+'</td><td>'+(arla?num(row.arla_liters):'—')+'</td><td>'+(arla?formatBRL(row.arla_amount):'—')+'</td><td>'+num(m.arlaAverage)+'</td><td>'+safe(row.description||'—')+'</td><td>'+formatBRL(row.amount)+'</td><td>'+safe(row.subject_plate||row.plate)+'</td>'+(inFleet?'<td><div class="employee-row-actions"><button class="row-action edit" data-managed-edit="'+safe(row.id)+'">Editar</button><button class="row-action delete" data-managed-delete="'+safe(row.id)+'">Excluir</button></div></td>':'')+'</tr>';
+            }).join(''):'<tr><td colspan="'+(inFleet?'18':'17')+'">Nenhum lançamento encontrado.</td></tr>';
+          };
           const update = () => {
             const search = $('#vehicleCostsSearch').value.trim().toLocaleLowerCase('pt-BR');
             const kind = $('#vehicleCostsKind').value;
@@ -1992,19 +2026,17 @@
                 const ids=new Set(vehicles.filter(v=>Array.isArray(v.driverIds)&&v.driverIds.includes(g.key)).map(v=>v.id));
                 rows.filter(r=>fleetDriverKey(r)===g.key).forEach(r=>ids.add(r.vehicle_id));
                 const available=vehicles.filter(v=>ids.has(v.id)&&v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v));
-                return available.map(v=>'<div class="employee-row-actions" style="margin-bottom:6px"><span>'+safe(v.plate||'Sem placa')+'</span><button type="button" class="row-action edit" data-fleet-link="'+safe(v.id)+'">Atrelar</button></div>').join('')||safe([...g.plates].join(' · ')||'Sem placa vinculada');
+                const linked=vehicles.some(v=>motorizedVehicle(v)&&Array.isArray(v.driverIds)&&v.driverIds.includes(g.key));
+                const plates=available.map(v=>'<div class="employee-row-actions" style="margin-bottom:6px"><span>'+safe(v.plate||'Sem placa')+'</span></div>').join('')||safe([...g.plates].join(' · ')||'Sem placa vinculada');
+                return plates+(linked?'':'<button type="button" class="row-action edit" data-fleet-unlinked="'+safe(g.key)+'">Atrelar</button>');
               };
               const moneyCells=g=>Object.keys(fleetKinds).map(k=>'<td>'+formatBRL(g.totals[k]||0)+'</td>').join('')+'<td>'+formatBRL(g.cost)+'</td><td>'+formatBRL(g.revenue-g.cost)+'</td>';
               const total={totals:Object.fromEntries(Object.keys(fleetKinds).map(k=>[k,0])),cost:0,revenue:0,count:0};
               summaryRows.forEach(g=>{Object.keys(fleetKinds).forEach(k=>total.totals[k]+=g.totals[k]||0);total.cost+=g.cost;total.revenue+=g.revenue;total.count+=g.count;});
-              $('#vehicleCostsBody').innerHTML=summaryRows.length?summaryRows.map(g=>'<tr><td><div class="employee-row-actions"><button type="button" class="row-action edit" data-fleet-driver="'+safe(g.key)+'" aria-label="Abrir todos os lançamentos de '+safe(g.name)+'">+</button><strong>'+safe(g.name)+'</strong></div></td><td>'+vehicleButtons(g)+'</td>'+moneyCells(g)+distanceCells(rows.filter(r=>fleetDriverKey(r)===g.key),g.cost)+'<td>'+g.count+'</td>'+averageCells(rows.filter(r=>fleetDriverKey(r)===g.key))+'<td><button class="row-action edit" data-fleet-driver="'+safe(g.key)+'">Ver lançamentos</button></td></tr>').join('')+'<tr><td><strong>Total</strong></td><td></td>'+moneyCells(total)+distanceCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))),total.cost)+'<td>'+total.count+'</td>'+averageCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))))+'<td></td></tr>':'<tr><td colspan="17">Nenhum motorista encontrado.</td></tr>';
+              $('#vehicleCostsBody').innerHTML=summaryRows.length?summaryRows.map(g=>'<tr><td><div class="employee-row-actions"><button type="button" class="row-action edit" data-fleet-expand="'+safe(g.key)+'" aria-expanded="'+expandedDrivers.has(g.key)+'" aria-label="Abrir todos os lançamentos de '+safe(g.name)+'">'+(expandedDrivers.has(g.key)?'−':'+')+'</button><strong>'+safe(g.name)+'</strong></div></td><td>'+vehicleButtons(g)+'</td>'+moneyCells(g)+distanceCells(rows.filter(r=>fleetDriverKey(r)===g.key),g.cost)+'<td>'+g.count+'</td>'+averageCells(rows.filter(r=>fleetDriverKey(r)===g.key))+'<td><button class="row-action edit" data-fleet-driver="'+safe(g.key)+'">Ver lançamentos</button></td></tr>'+(expandedDrivers.has(g.key)?'<tr><td colspan="17"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Motorista</th><th>Veículo / carreta</th><th>Tipo</th><th>Hodômetro</th><th>KM rodado</th><th>KM diesel</th><th>Diesel (L)</th><th>Diesel (R$)</th><th>Média diesel</th><th>KM ARLA</th><th>ARLA (L)</th><th>ARLA (R$)</th><th>Média ARLA</th><th>Descrição</th><th>Valor total</th><th>Placa do lançamento</th><th>Ações</th></tr></thead><tbody>'+entryRows(filtered.filter(r=>fleetDriverKey(r)===g.key))+'</tbody></table></div></td></tr>':'')).join('')+'<tr><td><strong>Total</strong></td><td></td>'+moneyCells(total)+distanceCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))),total.cost)+'<td>'+total.count+'</td>'+averageCells(rows.filter(r=>visibleKeys.has(fleetDriverKey(r))))+'<td></td></tr>':'<tr><td colspan="17">Nenhum motorista encontrado.</td></tr>';
               return;
             }
-            const num=value=>value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('pt-BR',{maximumFractionDigits:2});
-            $('#vehicleCostsBody').innerHTML=filtered.length?filtered.map(row=>{
-              const m=entryMetrics.get(row.id)||{},fuel=row.kind==='fuel',arla=fuel&&row.arla_liters!==null&&row.arla_liters!==undefined;
-              return '<tr><td>'+safe(row.entry_date?.split('-').reverse().join('/')||'—')+'</td><td><strong>'+safe(row.driverName)+'</strong></td><td>'+safe(row.plate)+(row.trailerPlate?'<span class="table-sub">Carreta: '+safe(row.trailerPlate)+'</span>':'')+'</td><td>'+safe(fleetKinds[row.kind]||row.kind)+'</td><td>'+num(row.odometer)+'</td><td>'+num(m.km)+'</td><td>'+num(m.dieselKm)+'</td><td>'+(fuel?num(row.liters):'—')+'</td><td>'+(fuel?formatBRL(Number(row.amount)-Number(row.arla_amount||0)):'—')+'</td><td>'+num(m.dieselAverage)+'</td><td>'+num(m.arlaKm)+'</td><td>'+(arla?num(row.arla_liters):'—')+'</td><td>'+(arla?formatBRL(row.arla_amount):'—')+'</td><td>'+num(m.arlaAverage)+'</td><td>'+safe(row.description||'—')+'</td><td>'+formatBRL(row.amount)+'</td><td>'+safe(row.subject_plate||row.plate)+'</td>'+(inFleet?'<td><div class="employee-row-actions"><button class="row-action edit" data-managed-edit="'+safe(row.id)+'">Editar</button><button class="row-action delete" data-managed-delete="'+safe(row.id)+'">Excluir</button></div></td>':'')+'</tr>';
-            }).join(''):'<tr><td colspan="'+(inFleet?'18':'17')+'">Nenhum lançamento encontrado.</td></tr>';
+            $('#vehicleCostsBody').innerHTML=entryRows(filtered);
           };
           if(inFleet){
             $('#openFleetDashboard').onclick=()=>renderView('fleetDashboard');
@@ -2017,6 +2049,10 @@
               const vehicleLink=event.target.closest('[data-fleet-vehicle]'),attach=event.target.closest('[data-fleet-link]');
               if(vehicleLink){fleetCostsPage={mode:'vehicle',vehicleId:vehicleLink.dataset.fleetVehicle};await renderVehicleCosts();return;}
               if(attach){openVehicleDriversModal(attach.dataset.fleetLink,renderVehicleCosts);return;}
+              const unlinked=event.target.closest('[data-fleet-unlinked]');
+              if(unlinked){openFleetLinkPicker();return;}
+              const expand=event.target.closest('[data-fleet-expand]');
+              if(expand){const key=expand.dataset.fleetExpand;if(expandedDrivers.has(key))expandedDrivers.delete(key);else expandedDrivers.add(key);update();return;}
               const driverLink=event.target.closest('[data-fleet-driver]');
               if(driverLink){fleetCostsPage={mode:'driver',driverKey:driverLink.dataset.fleetDriver};await renderVehicleCosts();return;}
               const edit=event.target.closest('[data-managed-edit]'),remove=event.target.closest('[data-managed-delete]');
@@ -3245,6 +3281,8 @@
         const roleOptions = roles.map(role => `<option ${record.role === role ? 'selected' : ''}>${role}</option>`).join('');
         const licenseOptions = licenses.map(license => `<option value="${license}" ${String(record.license || '') === license ? 'selected' : ''}>${license || 'Não se aplica'}</option>`).join('');
         const isPending = selfRegistration || record.status === 'Pendente de finalização';
+        const needsRegistrationPlate=selfRegistration&&['Motorista','Carreteiro'].includes(record.role);
+        let registrationPlateReady=!needsRegistrationPlate;
         const editableAccess = !selfRegistration && !archived && canViewOverview() && Boolean(record.userId);
         let accessModulesLoaded = !editableAccess;
         const accessModuleLabels = {driver:'Motorista',vehicles:'Veículos',employees:'Funcionários',accessRequests:'Solicitações de acesso',finance:'Financeiro',conferente:'Conferente',operacional:'Operacional',information:'Informações',usefulContacts:'Contatos úteis'};
@@ -3265,10 +3303,17 @@
             <div class="form-row"><div class="field"><label for="editEmployeeCity">Cidade *</label><input id="editEmployeeCity" name="city" value="${safe(record.city || '')}" required maxlength="70"></div><div class="field"><label for="editEmployeeState">UF *</label><input id="editEmployeeState" name="state" value="${safe(record.state || '')}" required maxlength="2"></div></div>
             <div class="form-section-label">Habilitação e documento</div>
             <div class="form-row"><div class="field"><label for="editEmployeeLicense">Categoria da CNH</label><select id="editEmployeeLicense" name="license">${licenseOptions}</select></div><div class="field file-field"><label for="editEmployeeDocument">CNH ou documento ${isPending ? '*' : ''}</label><input id="editEmployeeDocument" ${isPending && !record.document?.key ? 'required' : ''} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"><p id="editEmployeeDocumentStatus" class="file-status">${record.document ? `Arquivo atual: ${safe(record.document.name)}` : 'Nenhum documento anexado.'}</p></div></div>
+            ${needsRegistrationPlate?'<div class="field"><label for="registrationPlate">Placa do caminhão *</label><select id="registrationPlate" name="vehicle_id" required disabled><option value="">Carregando placas…</option></select><p id="registrationPlateStatus" role="status"></p><button type="button" class="secondary-button" id="retryRegistrationPlates">Atualizar placas</button></div>':''}
+            ${needsRegistrationPlate&&record.role==='Carreteiro'?'<div class="field"><label for="registrationTrailer">Placa da carreta *</label><select id="registrationTrailer" required disabled><option value="">Carregando carretas…</option></select></div>':''}
             ${accessFields}
             ${archived?`<div class="field"><label for="editDismissalReason">Motivo da demissão *</label><textarea id="editDismissalReason" required minlength="3" maxlength="1000">${safe(record.dismissalReason||'')}</textarea></div>`:''}
             <div class="modal-actions">${!selfRegistration&&!archived&&record.userId!==activeUser?.id?`<button id="dismissEmployeeButton" class="row-action delete" type="button">Dispensado</button>`:''}<button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit" name="employeeAction" value="save">Salvar alterações</button>${isPending ? `<button class="small-primary" type="submit" name="employeeAction" value="finalize">Finalizar cadastro</button>` : ''}</div>
           </form></section></div>`;
+        if(needsRegistrationPlate){
+          const plateSelect=$('#registrationPlate'),plateStatus=$('#registrationPlateStatus');
+          const loadPlates=async()=>{registrationPlateReady=false;plateSelect.disabled=true;plateStatus.textContent='Carregando placas disponíveis…';try{const client=await getSupabase();const {data,error}=await client.rpc('registration_vehicle_options');if(error)throw error;if($('#registrationPlate')!==plateSelect)return;plateSelect.innerHTML='<option value="">Selecione sua placa</option>'+(data||[]).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');if(record.role==='Carreteiro'){const trailers=await client.rpc('driver_vehicle_options_v2');if(trailers.error)throw trailers.error;if($('#registrationPlate')!==plateSelect)return;$('#registrationTrailer').innerHTML='<option value="">Selecione a carreta</option>'+(trailers.data||[]).filter(v=>v.is_trailer).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');$('#registrationTrailer').disabled=false;}plateSelect.disabled=false;registrationPlateReady=true;plateStatus.textContent=data?.length?'Selecione a placa para finalizar seu cadastro.':'Nenhum veículo disponível. Solicite o atrelamento à Frota.';}catch(error){plateStatus.textContent=authErrorMessage(error,'Não foi possível carregar as placas.');}};
+          $('#retryRegistrationPlates').onclick=loadPlates;loadPlates();
+        }
         if($('#dismissEmployeeButton'))$('#dismissEmployeeButton').onclick=()=>openEmployeeDismissalForm(record);
         $('#editEmployeeBirthDate').addEventListener('input', event => {
           const age = calculateAge(event.target.value);
@@ -3307,6 +3352,8 @@
           for (const key of ['name', 'cpf', 'rg', 'birthDate', 'role', 'phone', 'emergencyName', 'emergencyPhone', 'cep', 'street', 'number', 'district', 'complement', 'city', 'state', 'license']) employeeFields[key] = String(form.get(key) || '').trim();
           Object.assign(employeeFields, normalizeEmployeeNames(employeeFields));
           const finalize = selfRegistration || event.submitter?.value === 'finalize';
+          if(needsRegistrationPlate){if(!registrationPlateReady||!$('#registrationPlate').value){showToast('Selecione a placa do caminhão para finalizar o cadastro.');return;}employeeFields.vehicle_id=$('#registrationPlate').value;}
+          if(needsRegistrationPlate&&record.role==='Carreteiro'){if(!$('#registrationTrailer').value){showToast('Selecione também a placa da carreta.');return;}employeeFields.trailer_id=$('#registrationTrailer').value;}
           const existing = current.find(item => item.id === id);
           if (!existing) return;
           let documentData = existing.document || null;
@@ -3465,4 +3512,5 @@
   </script>
 </body>
 </html>
+
 
