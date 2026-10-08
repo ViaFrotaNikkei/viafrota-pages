@@ -281,6 +281,8 @@
     .vehicle-row-actions { gap: 12px; }
     .row-action.edit { color: #497850; }
     .row-action.delete { color: #a75b50; }
+    .payment-page-heading { flex-wrap: wrap; }
+    .payment-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .payment-order-list { display: grid; gap: 12px; }
     .payment-order-card { padding: 17px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
     .payment-order-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -490,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 53';
+      const APP_UPDATE_LABEL = 'Atualização nº 54';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -1156,11 +1158,12 @@
       }
 
       let paymentOrdersCache = [];
+      let showDeletedPaymentOrders = false;
       let paymentPageToken = 0;
       let paymentFormToken = 0;
-      const paymentStatusLabels = {pending:'Aguardando Operacional',rejected:'Devolvida ao Conferente',approved:'Encaminhada ao Financeiro'};
+      const paymentStatusLabels = {pending:'Aguardando Operacional',rejected:'Devolvida ao Conferente',approved:'Encaminhada ao Financeiro',deleted:'Excluída pelo Conferente'};
       function paymentOrdersForView(rows,view) {
-        return rows.filter(o => view==='conferente' ? o.created_by===activeUser?.id : view==='finance' ? o.status==='approved' : canViewOverview()||o.assigned_reviewer===activeUser?.id);
+        return rows.filter(o => (o.status!=='deleted'||(view==='conferente'&&showDeletedPaymentOrders)) && (view==='conferente' ? o.created_by===activeUser?.id : view==='finance' ? o.status==='approved' : canViewOverview()||o.assigned_reviewer===activeUser?.id));
       }
       function paymentOperationalCardHtml(order,userId) {
         const canReview=order.status==='pending'&&order.created_by!==userId&&order.assigned_reviewer===userId;
@@ -1266,8 +1269,8 @@
           paymentOrdersCache=paymentOrdersForView(allOrders,view);
           const pending=paymentOrdersCache.filter(o=>o.status==='pending').length;
           const returned=paymentOrdersCache.filter(o=>o.status==='rejected').length;
-          const total=paymentOrdersCache.reduce((sum,o)=>sum+Number(o.payment_amount),0);
-          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'Confira os dados e aprove para encaminhar ao Financeiro, ou recuse com um motivo.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
+          const total=paymentOrdersCache.filter(o=>o.status!=='deleted').reduce((sum,o)=>sum+Number(o.payment_amount),0);
+          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Edite ou exclua suas ordens pendentes; ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'Confira os dados e aprove para encaminhar ao Financeiro, ou recuse com um motivo.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
           if(view==='operacional'){
             const cards=paymentOrdersCache.length?'<div class="payment-order-list">'+paymentOrdersCache.map(o=>paymentOperationalCardHtml(o,userId)).join('')+'</div>':'<div class="table-card"><div class="empty-state"><strong>Nenhuma ordem de pagamento</strong><span>As ordens atribuídas a você aparecerão aqui.</span></div></div>';
             $('#mainContent').innerHTML='<div class="page-heading"><div><h1>'+title+'</h1><p>'+description+'</p></div><button id="refreshPaymentOrders" class="secondary-button">Atualizar</button></div><p class="request-panel-note">'+paymentOrdersCache.length+' ordens · '+pending+' aguardando análise · '+returned+' devolvidas · Valor a pagar: '+formatBRL(total)+'</p>'+cards;
@@ -1276,9 +1279,13 @@
             $$('[data-payment-detail]').forEach(button=>button.onclick=()=>openPaymentOrderDetail(paymentOrdersCache.find(o=>o.id===button.dataset.paymentDetail),view,button.dataset.paymentReviewIntent));
             return;
           }
-          $('#mainContent').innerHTML='<div class="page-heading"><div><h1>'+title+'</h1><p>'+description+'</p></div><div style="display:flex;gap:8px"><button id="refreshPaymentOrders" class="secondary-button">Atualizar</button>'+(view==='conferente'?'<button id="newPaymentOrder" class="small-primary">Nova ordem de pagamento</button>':'')+'</div></div><p class="request-panel-note">'+paymentOrdersCache.length+' ordens · '+pending+' aguardando análise · '+returned+' devolvidas · Valor a pagar: '+formatBRL(total)+'</p><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Data do serviço</th><th>NFe</th><th>Placa</th><th>Serviço</th><th>Valor do serviço</th><th>Beneficiário</th><th>Valor a pagar</th><th>Responsável Operacional</th><th>Situação</th><th>Ações</th></tr></thead><tbody>'+ (paymentOrdersCache.length?paymentOrdersCache.map(o=>'<tr><td><strong>OP #'+safe(o.number)+'</strong></td><td>'+safe(formatPaymentDate(o.service_date))+'</td><td>'+safe(o.nfe)+'</td><td>'+safe(o.plate)+'</td><td>'+safe(o.service)+'</td><td>'+formatBRL(o.service_amount)+'</td><td>'+safe(o.beneficiary)+'</td><td>'+formatBRL(o.payment_amount)+'</td><td>'+safe(o.assigned_reviewer_name||'—')+'</td><td><span class="status-pill '+(o.status==='pending'?'pending':o.status==='rejected'?'inactive':'')+'">'+safe(paymentStatusLabels[o.status])+'</span>'+(o.rejection_reason?'<span class="table-sub">Motivo: '+safe(o.rejection_reason)+'</span>':'')+'</td><td><button class="row-action edit" data-payment-detail="'+safe(o.id)+'">'+(view==='operacional'&&o.status==='pending'&&o.created_by!==userId&&o.assigned_reviewer===userId?'Analisar':'Ver ordem')+'</button>'+(view==='conferente'&&o.status==='rejected'?'<button class="row-action edit" data-payment-edit="'+safe(o.id)+'">Corrigir e reenviar</button>':'')+'</td></tr>').join(''):'<tr><td colspan="11"><div class="empty-state"><strong>Nenhuma ordem de pagamento</strong><span>'+ (view==='finance'?'As ordens aparecerão aqui após a aprovação do Operacional.':'As ordens deste módulo aparecerão aqui.')+'</span></div></td></tr>')+'</tbody></table></div></div>';
+          $('#mainContent').innerHTML='<div class="page-heading payment-page-heading"><div><h1>'+title+'</h1><p>'+description+'</p></div><div class="payment-heading-actions"><button id="refreshPaymentOrders" class="secondary-button">Atualizar</button>'+(view==='conferente'?'<button id="toggleDeletedPaymentOrders" class="secondary-button">'+(showDeletedPaymentOrders?'Ocultar excluídas':'Mostrar excluídas')+'</button><button id="newPaymentOrder" class="small-primary">Nova ordem de pagamento</button>':'')+'</div></div><p class="request-panel-note">'+paymentOrdersCache.length+' ordens · '+pending+' aguardando análise · '+returned+' devolvidas · Valor a pagar: '+formatBRL(total)+'</p><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Data do serviço</th><th>NFe</th><th>Placa</th><th>Serviço</th><th>Valor do serviço</th><th>Beneficiário</th><th>Valor a pagar</th><th>Responsável Operacional</th><th>Situação</th><th>Ações</th></tr></thead><tbody>'+ (paymentOrdersCache.length?paymentOrdersCache.map(o=>'<tr><td><strong>OP #'+safe(o.number)+'</strong></td><td>'+safe(formatPaymentDate(o.service_date))+'</td><td>'+safe(o.nfe)+'</td><td>'+safe(o.plate)+'</td><td>'+safe(o.service)+'</td><td>'+formatBRL(o.service_amount)+'</td><td>'+safe(o.beneficiary)+'</td><td>'+formatBRL(o.payment_amount)+'</td><td>'+safe(o.assigned_reviewer_name||'—')+'</td><td><span class="status-pill '+(o.status==='pending'?'pending':o.status==='rejected'?'inactive':'')+'">'+safe(paymentStatusLabels[o.status])+'</span>'+(o.rejection_reason?'<span class="table-sub">Motivo: '+safe(o.rejection_reason)+'</span>':'')+'</td><td>'+(view==='conferente'&&['pending','rejected'].includes(o.status)?'<button class="row-action edit" data-payment-edit="'+safe(o.id)+'">Editar</button><button class="row-action delete" data-payment-delete="'+safe(o.id)+'">Excluir</button>':'')+'<button class="row-action edit" data-payment-detail="'+safe(o.id)+'">'+(view==='conferente'?'Histórico':'Ver ordem')+'</button></td></tr>').join(''):'<tr><td colspan="11"><div class="empty-state"><strong>Nenhuma ordem de pagamento</strong><span>'+ (view==='finance'?'As ordens aparecerão aqui após a aprovação do Operacional.':'As ordens deste módulo aparecerão aqui.')+'</span></div></td></tr>')+'</tbody></table></div></div>';
           $('#refreshPaymentOrders').onclick=()=>renderPaymentOrders(view);
-          if(view==='conferente')$('#newPaymentOrder').onclick=()=>openPaymentOrderForm();
+          if(view==='conferente'){
+            $('#newPaymentOrder').onclick=()=>openPaymentOrderForm();
+            $('#toggleDeletedPaymentOrders').onclick=async()=>{showDeletedPaymentOrders=!showDeletedPaymentOrders;await renderPaymentOrders(view);};
+            $$('[data-payment-delete]').forEach(button=>button.onclick=()=>openDeletePaymentOrder(paymentOrdersCache.find(o=>o.id===button.dataset.paymentDelete)));
+          }
           $$('[data-payment-edit]').forEach(button=>button.onclick=()=>openPaymentOrderForm(paymentOrdersCache.find(o=>o.id===button.dataset.paymentEdit)));
           $$('[data-payment-detail]').forEach(button=>button.onclick=()=>openPaymentOrderDetail(paymentOrdersCache.find(o=>o.id===button.dataset.paymentDetail),view,button.dataset.paymentReviewIntent));
         }catch(error){
@@ -1286,6 +1293,23 @@
           $('#mainContent').innerHTML='<div class="empty-state"><strong>'+safe(authErrorMessage(error,'Não foi possível carregar as ordens.'))+'</strong><button id="retryPaymentOrders" class="small-primary">Tentar novamente</button></div>';
           $('#retryPaymentOrders').onclick=()=>renderPaymentOrders(view);
         }
+      }
+      function openDeletePaymentOrder(order) {
+        if(!canAccess('conferente')||!order||order.created_by!==activeUser?.id||!['pending','rejected'].includes(order.status))return;
+        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="deletePaymentTitle"><div class="modal-head"><h2 id="deletePaymentTitle">Excluir OP #'+safe(order.number)+'?</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><p>A ordem será retirada da lista ativa e da análise do Operacional. O registro e seu histórico serão preservados e poderão ser consultados em Mostrar excluídas.</p><p id="deletePaymentError" class="login-error" role="alert"></p><div class="modal-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button id="confirmDeletePaymentOrder" class="small-primary" type="button">Confirmar exclusão</button></div></section></div>';
+        bindActions();
+        const button=$('#confirmDeletePaymentOrder'),errorNode=$('#deletePaymentError'),userId=activeUser.id;
+        button.onclick=async()=>{
+          if(button.disabled||activeUser?.id!==userId)return;
+          button.disabled=true;
+          try{
+            const client=await getSupabase();
+            const {error}=await client.rpc('manage_payment_order',{p_action:'delete',p_id:order.id,p_version:order.version});
+            if(error)throw error;
+            if(activeUser?.id!==userId)return;
+            $('#modalRoot').innerHTML='';showToast('Ordem excluída. Histórico preservado.');await renderPaymentOrders('conferente');
+          }catch(error){if(errorNode.isConnected)errorNode.textContent=authErrorMessage(error,'Não foi possível excluir a ordem.');button.disabled=false;}
+        };
       }
       function formatPaymentDate(value) {
         const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1297,7 +1321,7 @@
       }
       async function openPaymentOrderForm(order,mode='conferente') {
         const operational=mode==='operacional';
-        if(operational ? !canAccess('operacional')||!order||order.status!=='pending'||order.assigned_reviewer!==activeUser?.id||order.created_by===activeUser?.id : !canAccess('conferente')||(order&&(order.created_by!==activeUser?.id||order.status!=='rejected')))return;
+        if(operational ? !canAccess('operacional')||!order||order.status!=='pending'||order.assigned_reviewer!==activeUser?.id||order.created_by===activeUser?.id : !canAccess('conferente')||(order&&(order.created_by!==activeUser?.id||!['pending','rejected'].includes(order.status))))return;
         const token=++paymentFormToken,userId=activeUser.id;
         $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal"><p>Carregando responsáveis do Operacional…</p><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button></section></div>';
         bindActions();
@@ -1310,7 +1334,7 @@
         const field=(name,label,type,attrs='')=>'<div class="field"><label for="payment-'+name+'">'+label+' *</label><input id="payment-'+name+'" name="'+name+'" type="'+type+'" value="'+safe(order?.[name]??'')+'" required '+attrs+'></div>';
         const optionalField=(name,label,limit)=>'<div class="field"><label for="payment-'+name+'">'+label+' (opcional)</label><input id="payment-'+name+'" name="'+name+'" type="text" value="'+safe(order?.[name]??'')+'" maxlength="'+limit+'"></div>';
         const reviewerField='<div class="field"><label for="payment-assigned_reviewer">Responsável do Operacional *</label><select id="payment-assigned_reviewer" name="assigned_reviewer" required '+(operational?'disabled':'')+'><option value="">Selecione quem deverá aprovar</option>'+reviewers.map(r=>'<option value="'+safe(r.user_id)+'" '+(r.user_id===order?.assigned_reviewer?'selected':'')+'>'+safe(r.name)+'</option>').join('')+'</select>'+(reviewers.length?'':'<p class="login-error">Nenhum funcionário ativo do Operacional disponível. Solicite à administração a ativação do responsável.</p>')+'</div>';
-        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="paymentFormTitle"><div class="modal-head"><div><h2 id="paymentFormTitle">'+(order?(operational?'Editar OP #':'Corrigir OP #')+safe(order.number):'Nova ordem de pagamento')+'</h2><p>'+(operational?'Salvar a edição e continuar a análise.':'Enviar para análise do Operacional.')+'</p></div><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="paymentOrderForm">'+reviewerField+'<div class="form-row">'+field('service_date','Data do serviço','date')+field('nfe','NFe','text','maxlength="44"')+'</div><div class="form-row">'+field('plate','Placa','text','maxlength="8" pattern="[A-Z]{3}-[0-9][A-Z0-9][0-9]{2}" placeholder="ABC-1D23" title="Informe a placa completa: ABC-1234 ou ABC-1D23." autocomplete="off"')+field('service_amount','Valor do serviço (R$)','text','inputmode="decimal" maxlength="18" placeholder="0,00" autocomplete="off"')+'</div><div class="form-row">'+optionalField('container_number','Número do contêiner',100)+optionalField('driver_name','Nome do motorista',120)+'</div><div class="field"><label for="payment-service">Serviço *</label><textarea id="payment-service" name="service" required maxlength="500">'+safe(order?.service||'')+'</textarea></div>'+field('beneficiary','Beneficiário (nome)','text','minlength="2" maxlength="120"')+'<div class="form-row">'+field('payment_amount','Valor a pagar (R$)','text','inputmode="decimal" maxlength="18" placeholder="0,00" autocomplete="off"')+'<div class="field"><label for="payment-pix_key_type">Tipo de chave PIX *</label><select id="payment-pix_key_type" name="pix_key_type" required><option value="">Selecione o tipo</option>'+Object.entries(pixTypeLabels).map(([value,label])=>'<option value="'+value+'" '+(order?.pix_key_type===value?'selected':'')+'>'+label+'</option>').join('')+'</select></div></div><div class="form-row">'+field('pix_key','Chave Pix','text','maxlength="150"')+'</div>'+(order?.rejection_reason?'<p class="request-panel-note">Corrija: '+safe(order.rejection_reason)+'</p>':'')+'<div class="form-row">'+['min','rom','nd'].map(name=>optionalField(name,name.toUpperCase(),100)).join('')+'</div>'+(order&&!operational?'<p class="request-panel-note">Para reenviar, preencha pelo menos MIN, ROM, ND ou OBS (Observações).</p>':'')+'<div class="field"><label for="payment-observations">Observações (opcional)</label><textarea id="payment-observations" name="observations" maxlength="1000">'+safe(order?.observations||'')+'</textarea></div><p id="paymentFormError" class="login-error" role="alert"></p><div class="modal-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit">'+(operational?'Salvar edição':order?'Reenviar ao Operacional':'Enviar ao Operacional')+'</button></div></form></section></div>';
+        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="paymentFormTitle"><div class="modal-head"><div><h2 id="paymentFormTitle">'+(order?(operational||order.status==='pending'?'Editar OP #':'Corrigir OP #')+safe(order.number):'Nova ordem de pagamento')+'</h2><p>'+(operational?'Salvar a edição e continuar a análise.':'Enviar para análise do Operacional.')+'</p></div><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="paymentOrderForm">'+reviewerField+'<div class="form-row">'+field('service_date','Data do serviço','date')+field('nfe','NFe','text','maxlength="44"')+'</div><div class="form-row">'+field('plate','Placa','text','maxlength="8" pattern="[A-Z]{3}-[0-9][A-Z0-9][0-9]{2}" placeholder="ABC-1D23" title="Informe a placa completa: ABC-1234 ou ABC-1D23." autocomplete="off"')+field('service_amount','Valor do serviço (R$)','text','inputmode="decimal" maxlength="18" placeholder="0,00" autocomplete="off"')+'</div><div class="form-row">'+optionalField('container_number','Número do contêiner',100)+optionalField('driver_name','Nome do motorista',120)+'</div><div class="field"><label for="payment-service">Serviço *</label><textarea id="payment-service" name="service" required maxlength="500">'+safe(order?.service||'')+'</textarea></div>'+field('beneficiary','Beneficiário (nome)','text','minlength="2" maxlength="120"')+'<div class="form-row">'+field('payment_amount','Valor a pagar (R$)','text','inputmode="decimal" maxlength="18" placeholder="0,00" autocomplete="off"')+'<div class="field"><label for="payment-pix_key_type">Tipo de chave PIX *</label><select id="payment-pix_key_type" name="pix_key_type" required><option value="">Selecione o tipo</option>'+Object.entries(pixTypeLabels).map(([value,label])=>'<option value="'+value+'" '+(order?.pix_key_type===value?'selected':'')+'>'+label+'</option>').join('')+'</select></div></div><div class="form-row">'+field('pix_key','Chave Pix','text','maxlength="150"')+'</div>'+(order?.rejection_reason?'<p class="request-panel-note">Corrija: '+safe(order.rejection_reason)+'</p>':'')+'<div class="form-row">'+['min','rom','nd'].map(name=>optionalField(name,name.toUpperCase(),100)).join('')+'</div>'+(order?.status==='rejected'&&!operational?'<p class="request-panel-note">Para reenviar, preencha pelo menos MIN, ROM, ND ou OBS (Observações).</p>':'')+'<div class="field"><label for="payment-observations">Observações (opcional)</label><textarea id="payment-observations" name="observations" maxlength="1000">'+safe(order?.observations||'')+'</textarea></div><p id="paymentFormError" class="login-error" role="alert"></p><div class="modal-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit">'+(operational||order?.status==='pending'?'Salvar edição':order?'Reenviar ao Operacional':'Enviar ao Operacional')+'</button></div></form></section></div>';
         bindActions();
         const form=$('#paymentOrderForm');
         const pixTypeInput=form.querySelector('[name="pix_key_type"]'),pixInput=form.querySelector('[name="pix_key"]');
@@ -1341,7 +1365,7 @@
             if(input.value.trim().length<(name==='beneficiary'?2:1))input.setCustomValidity('Preencha este campo corretamente.');
           }
           if(!pixKeyValid(pixInput.value,pixTypeInput.value))pixInput.setCustomValidity('Selecione o tipo de chave PIX e informe uma chave válida.');
-          if(order&&!operational&&!paymentResubmitValid(Object.fromEntries(['min','rom','nd','observations'].map(name=>[name,form.querySelector('[name="'+name+'"]').value]))))form.querySelector('[name="observations"]').setCustomValidity('Preencha pelo menos MIN, ROM, ND ou OBS para reenviar.');
+          if(order?.status==='rejected'&&!operational&&!paymentResubmitValid(Object.fromEntries(['min','rom','nd','observations'].map(name=>[name,form.querySelector('[name="'+name+'"]').value]))))form.querySelector('[name="observations"]').setCustomValidity('Preencha pelo menos MIN, ROM, ND ou OBS para reenviar.');
           return form.reportValidity();
         }
 
@@ -1357,9 +1381,9 @@
             const payload=paymentOrderData(new FormData(form));
             if(operational)payload.assigned_reviewer=order.assigned_reviewer;
             const client=await getSupabase();
-            const {error}=await client.rpc('manage_payment_order',{p_action:operational?'edit':order?'resubmit':'submit',p_id:order?.id||null,p_data:payload,p_version:order?.version||null});
+            const {error}=await client.rpc('manage_payment_order',{p_action:operational?'edit':order?.status==='pending'?'author_edit':order?'resubmit':'submit',p_id:order?.id||null,p_data:payload,p_version:order?.version||null});
             if(error)throw error;
-            $('#modalRoot').innerHTML='';showToast(operational?'Edição registrada. Continue a análise da ordem.':'Ordem enviada ao Operacional.');await renderPaymentOrders(mode);
+            $('#modalRoot').innerHTML='';showToast(operational?'Edição registrada. Continue a análise da ordem.':order?.status==='pending'?'Edição salva e registrada no histórico.':'Ordem enviada ao Operacional.');await renderPaymentOrders(mode);
           }catch(error){if($('#paymentFormError'))$('#paymentFormError').textContent=authErrorMessage(error,'Não foi possível enviar a ordem.');button.disabled=false;}
         };
       }
@@ -1392,7 +1416,7 @@
           const {data,error}=await client.from('payment_order_events').select('action,reason,created_at,snapshot').eq('order_id',order.id).order('created_at');
           if(error)throw error;
           if(!root.isConnected)return;
-          const labels={edited:'Editada pelo Operacional',submitted:'Enviada ao Operacional',resubmitted:'Corrigida e reenviada',approved:'Aprovada e encaminhada ao Financeiro',rejected:'Recusada e devolvida ao Conferente'};
+          const labels={author_edited:'Editada pelo Conferente',deleted:'Excluída pelo Conferente',edited:'Editada pelo Operacional',submitted:'Enviada ao Operacional',resubmitted:'Corrigida e reenviada',approved:'Aprovada e encaminhada ao Financeiro',rejected:'Recusada e devolvida ao Conferente'};
           root.innerHTML=(data||[]).map(e=>'<details style="margin:10px 0"><summary>'+safe(new Date(e.created_at).toLocaleString('pt-BR'))+' · '+safe(labels[e.action])+'</summary>'+paymentDetailsHtml(e.snapshot)+'</details>').join('')||'Nenhuma movimentação.';
         }catch(error){if(root.isConnected)root.textContent=authErrorMessage(error,'Não foi possível carregar o histórico.');}
       }
@@ -3175,3 +3199,4 @@
   </script>
 </body>
 </html>
+
