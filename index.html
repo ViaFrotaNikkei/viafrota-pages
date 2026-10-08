@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 55';
+      const APP_UPDATE_LABEL = 'Atualização nº 56';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -1166,7 +1166,7 @@
         return rows.filter(o => (o.status!=='deleted'||(view==='conferente'&&showDeletedPaymentOrders)) && (view==='conferente' ? o.created_by===activeUser?.id : view==='finance' ? o.status==='approved' : canViewOverview()||o.assigned_reviewer===activeUser?.id));
       }
       function canReviewPaymentOrder(order,userId=activeUser?.id) {
-        return Boolean(order&&userId&&order.status==='pending'&&order.created_by!==userId&&(order.assigned_reviewer===userId||canViewOverview()));
+        return Boolean(order&&userId&&order.status==='pending'&&(canViewOverview()||(order.created_by!==userId&&order.assigned_reviewer===userId)));
       }
       function paymentOperationalCardHtml(order,userId) {
         const canReview=canReviewPaymentOrder(order,userId);
@@ -1273,7 +1273,7 @@
           const pending=paymentOrdersCache.filter(o=>o.status==='pending').length;
           const returned=paymentOrdersCache.filter(o=>o.status==='rejected').length;
           const total=paymentOrdersCache.filter(o=>o.status!=='deleted').reduce((sum,o)=>sum+Number(o.payment_amount),0);
-          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Edite ou exclua suas ordens pendentes; ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'O responsável escolhido e o Master podem editar e aprovar ordens pendentes, ou recusar com um motivo. Não é permitido analisar uma ordem criada pelo próprio login.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
+          const description=view==='conferente'?'Crie a ordem e acompanhe a análise. Edite ou exclua suas ordens pendentes; ordens recusadas podem ser corrigidas e reenviadas.':view==='operacional'?'O responsável escolhido e o Master podem editar e aprovar ordens pendentes, ou recusar com um motivo. O Master também pode analisar ordens criadas pelo próprio login; os demais usuários não podem analisar suas próprias ordens.':'Ordens aprovadas pelo Operacional, disponíveis para conferência e pagamento.';
           if(view==='operacional'){
             const cards=paymentOrdersCache.length?'<div class="payment-order-list">'+paymentOrdersCache.map(o=>paymentOperationalCardHtml(o,userId)).join('')+'</div>':'<div class="table-card"><div class="empty-state"><strong>Nenhuma ordem de pagamento</strong><span>As ordens atribuídas a você aparecerão aqui.</span></div></div>';
             $('#mainContent').innerHTML='<div class="page-heading"><div><h1>'+title+'</h1><p>'+description+'</p></div><button id="refreshPaymentOrders" class="secondary-button">Atualizar</button></div><p class="request-panel-note">'+paymentOrdersCache.length+' ordens · '+pending+' aguardando análise · '+returned+' devolvidas · Valor a pagar: '+formatBRL(total)+'</p>'+cards;
