@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 65';
+      const APP_UPDATE_LABEL = 'Atualização nº 66';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -2272,7 +2272,7 @@
           const address = [record.street, record.number, record.district, record.city, record.state, record.cep].filter(Boolean).join(', ');
           const status = archived ? 'Dispensado' : record.status || 'Ativo';
           const statusClass = status === 'Pendente de finalização' ? 'pending' : status === 'Inativo' ? 'inactive' : '';
-          return `<tr><td><strong>${safe(record.name)}</strong>${record.email ? `<span class="table-sub">${safe(record.email)}</span>` : ''}</td><td>${safe(record.cpf || '—')}</td><td>${safe(formatRG(record.rg) || '—')}</td><td>${safe(record.role || '—')}</td><td>${safe(record.license || '—')}</td><td>${phoneCell(record.phone)}</td><td>${age === '' ? '—' : `${age} anos`}</td><td>${safe(address || '—')}</td><td>${safe(record.emergencyName || '—')}<span class="table-sub">${phoneCell(record.emergencyPhone)}</span></td><td>${documentCell}</td><td><span class="status-pill ${statusClass}">${safe(status)}</span></td>${archived?`<td>${safe(record.dismissalReason||'—')}<span class="table-sub">${safe(new Date(record.dismissedAt).toLocaleDateString('pt-BR'))}</span></td>`:''}<td>${archived ? `<button class="row-action edit" data-action="view-dismissed-employee" data-id="${safe(record.id)}">Ver cadastro</button>${canViewOverview()?`<button class="row-action edit" data-action="edit-employee" data-id="${safe(record.id)}">Editar (Master)</button>`:''}` : `<div class="employee-row-actions">${(canViewOverview() || fleetClerk) && !record.userId && record.status !== 'Inativo' && (!fleetClerk || ['Ajudante','Motorista'].includes(record.role)) ? `<button class="row-action edit" data-action="create-employee-access" data-id="${safe(record.id)}">Criar acesso</button>` : ''}<button class="row-action edit" data-action="edit-employee" data-id="${safe(record.id)}">Editar</button>${fleetClerk ? '' : `<button class="row-action delete" data-action="remove-record" data-kind="employees" data-id="${safe(record.id)}">Excluir</button>`}</div>`}</td></tr>`;
+          return `<tr><td><strong>${safe(record.name)}</strong>${record.email ? `<span class="table-sub">${safe(record.email)}</span>` : ''}</td><td>${safe(record.cpf || '—')}</td><td>${safe(formatRG(record.rg) || '—')}</td><td>${safe(record.role || '—')}</td><td>${safe(record.license || '—')}</td><td>${phoneCell(record.phone)}</td><td>${age === '' ? '—' : `${age} anos`}</td><td>${safe(address || '—')}</td><td>${safe(record.emergencyName || '—')}<span class="table-sub">${phoneCell(record.emergencyPhone)}</span></td><td>${documentCell}</td><td><span class="status-pill ${statusClass}">${safe(status)}</span></td>${archived?`<td>${safe(record.dismissalReason||'—')}<span class="table-sub">${safe(new Date(record.dismissedAt).toLocaleDateString('pt-BR'))}</span></td>`:''}<td>${archived ? `<button class="row-action edit" data-action="view-dismissed-employee" data-id="${safe(record.id)}">Ver cadastro</button>${canViewOverview()?`<button class="row-action edit" data-action="edit-employee" data-id="${safe(record.id)}">Editar (Master)</button>`:''}` : `<div class="employee-row-actions">${(canViewOverview() || fleetClerk) && !record.userId && record.status !== 'Inativo' && (!fleetClerk || ['Ajudante','Motorista'].includes(record.role)) ? `<button class="row-action edit" data-action="create-employee-access" data-id="${safe(record.id)}">Criar acesso</button>` : ''}<button class="row-action edit" data-action="edit-employee" data-id="${safe(record.id)}">Editar</button>${fleetClerk && !['Ajudante','Motorista'].includes(record.role) ? '' : `<button class="row-action delete" data-action="remove-record" data-kind="employees" data-id="${safe(record.id)}">Excluir</button>`}</div>`}</td></tr>`;
         }).join('') : `<tr><td colspan="${archived?13:12}"><div class="empty-state"><div class="stat-icon">${icons.users}</div><strong>${searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum funcionário cadastrado'}</strong><span>${searchTerm ? 'Tente buscar por outro termo.' : 'Use o botão abaixo para adicionar o primeiro registro.'}</span></div></td></tr>`;
         $('#mainContent').innerHTML = `
           <button class="back-button" data-action="open-registries">${icons.arrow} Voltar para cadastros</button>
@@ -3508,7 +3508,8 @@
         const record = current.find(item => item.id === id);
         if (!record) return;
         try {
-          if (kind === 'employees' && record.userId) {
+          if (kind === 'employees' && fleetClerk && !['Ajudante','Motorista'].includes(record.role)) { showToast('Frota pode excluir somente Motorista e Ajudante.'); return; }
+          if (kind === 'employees' && record.userId && !fleetClerk) {
             await callManageAccess({ action: 'revoke_user', userId: record.userId });
           }
           await deleteRecordFromDatabase(kind, id);
