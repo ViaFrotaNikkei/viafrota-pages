@@ -492,7 +492,7 @@
         manager: { label: 'Gestor (todos os módulos)', permissions: ['vehicles', 'employees', 'accessRequests'] }
       };
       const FIPE_BASE = 'https://parallelum.com.br/fipe/api/v2';
-      const APP_UPDATE_LABEL = 'Atualização nº 64';
+      const APP_UPDATE_LABEL = 'Atualização nº 65';
       const OVERVIEW_OWNER_USER_ID = '4be2ce46-8861-4017-8c8e-8a00fb334d16';
       const canViewOverview = () => Boolean(activeUser && activeUser.id === OVERVIEW_OWNER_USER_ID);
       let currentView = 'home';
@@ -588,7 +588,7 @@
         driverEnabled = Boolean(enabled);
         if(driverEnabled&&!canAccess('vehicles'))await loadSuppliers(client);
         driverVehicleId = '';
-        driverTrailerId = '';
+        driverTrailerId = '';driverTrailer2Id='';
         driverVehicles = [];
         fleetEntries = [];
       }
@@ -1049,6 +1049,8 @@
       let driverVehicles = [];
       let driverVehicleId = '';
       let driverTrailerId = '';
+      let driverTrailer2Id = '';
+      function driverNeedsTwoTrailers(id){return driverJob==='Carreteiro'&&String(driverVehicles.find(v=>v.id===id)?.category||'').replace(/\s/g,'').toLowerCase().includes('6x4');}
       let driverJob = '';
       let fleetEntries = [];
       let vehicleFuelAverage = null;
@@ -1069,17 +1071,19 @@
           if (result.error) throw result.error;
           driverVehicles = result.data || [];
           if (!driverVehicleId) {
-            const saved = await client.from('driver_vehicle_selection').select('vehicle_id,trailer_id').eq('user_id',authUser.id).maybeSingle();
+            const saved = await client.from('driver_vehicle_selection').select('vehicle_id,trailer_id,trailer2_id').eq('user_id',authUser.id).maybeSingle();
             if (saved.error) throw saved.error;
             driverVehicleId = saved.data?.vehicle_id || '';
-            driverTrailerId = saved.data?.trailer_id || '';
+            driverTrailerId = saved.data?.trailer_id || '';driverTrailer2Id=saved.data?.trailer2_id||'';
           }
           if (!driverVehicles.some(v => v.id === driverVehicleId && !v.is_trailer)) driverVehicleId = '';
           if (!driverVehicles.some(v => v.id === driverTrailerId && v.is_trailer)) driverTrailerId = '';
+          if (!driverVehicles.some(v=>v.id===driverTrailer2Id&&v.is_trailer))driverTrailer2Id='';
+          if (!driverNeedsTwoTrailers(driverVehicleId))driverTrailer2Id='';
           if (driverJob !== 'Carreteiro') driverTrailerId = '';
           fleetEntries = [];
           vehicleFuelAverage = null;vehicleArlaAverage=null;
-          if (driverVehicleId && (driverJob !== 'Carreteiro' || driverTrailerId)) {
+          if (driverVehicleId && (driverJob !== 'Carreteiro' || (driverTrailerId&&(!driverNeedsTwoTrailers(driverVehicleId)||driverTrailer2Id)))) {
             const result = await client.from('fleet_entries').select('*').eq('vehicle_id',driverVehicleId).order('entry_date',{ascending:false}).order('created_at',{ascending:false});
             if (result.error) throw result.error;
             fleetEntries = result.data || [];
@@ -1105,22 +1109,25 @@
         const rows = fleetEntries.map(e => '<tr><td>'+safe(e.entry_date.split('-').reverse().join('/'))+'</td><td>'+fleetKinds[e.kind]+'</td><td>'+number(e.odometer)+' km</td><td>'+(e.kind==='fuel' ? 'Diesel: '+number(e.liters)+' L'+(e.full_tank?' · tanque cheio':' · parcial')+(e.arla_liters?'<br>ARLA: '+number(e.arla_liters)+' L'+(e.arla_full_tank?' · tanque cheio':' · parcial'):'') : '—')+'</td><td>'+formatBRL(e.amount)+'</td><td>'+safe(e.description || '—')+'</td><td><div class="employee-row-actions"><button class="row-action edit" data-fleet-edit="'+e.id+'">Editar</button><button class="row-action delete" data-fleet-delete="'+e.id+'">Excluir</button></div></td></tr>').join('');
         const trucks=driverVehicles.filter(v=>!v.is_trailer), trailers=driverVehicles.filter(v=>v.is_trailer);
         const needsTrailer=driverJob==='Carreteiro';
-        const ready=Boolean(driverVehicleId && (!needsTrailer || driverTrailerId));
+        const ready=Boolean(driverVehicleId && (!needsTrailer || (driverTrailerId&&(!driverNeedsTwoTrailers(driverVehicleId)||(driverTrailer2Id&&driverTrailer2Id!==driverTrailerId)))));
         const options=(list,selected)=>list.map(v=>'<option value="'+v.id+'" '+(v.id===selected?'selected':'')+'>'+safe(v.plate)+' · '+safe(v.model || v.category || 'Veículo')+'</option>').join('');
-        $('#mainContent').innerHTML = '<div class="page-heading"><div><h1>Motorista</h1><p>Selecione '+(needsTrailer?'o caminhão e a carreta':'o caminhão')+' em uso para iniciar o controle da operação.</p></div></div><section class="fipe-panel"><div class="form-row"><div class="field"><label for="driverPlate">Placa do caminhão *</label><select id="driverPlate"><option value="">Selecione o caminhão</option>'+options(trucks,driverVehicleId)+'</select></div>'+(needsTrailer?'<div class="field"><label for="driverTrailer">Placa da carreta *</label><select id="driverTrailer"><option value="">Selecione a carreta</option>'+options(trailers,driverTrailerId)+'</select></div>':'')+'</div><p class="form-hint">'+(!trucks.length?'Nenhum caminhão disponível. Solicite o cadastro à administração.':needsTrailer&&!trailers.length?'Nenhuma carreta cadastrada e disponível. Solicite seu cadastro à administração.':'As placas vêm do cadastro de veículos. Confirme as escolhas para salvá-las no seu login.')+'</p><button id="confirmDriverVehicles" class="small-primary">Confirmar '+(needsTrailer?'caminhão e carreta':'caminhão')+'</button><p id="driverSelectionError" class="login-error" role="alert"></p></section>'+
+        $('#mainContent').innerHTML = '<div class="page-heading"><div><h1>Motorista</h1><p>Selecione '+(needsTrailer?'o caminhão e a carreta':'o caminhão')+' em uso para iniciar o controle da operação.</p></div></div><section class="fipe-panel"><div class="form-row"><div class="field"><label for="driverPlate">Placa do caminhão *</label><select id="driverPlate"><option value="">Selecione o caminhão</option>'+options(trucks,driverVehicleId)+'</select></div>'+(needsTrailer?'<div class="field"><label for="driverTrailer">Placa da carreta *</label><select id="driverTrailer"><option value="">Selecione a carreta</option>'+options(trailers,driverTrailerId)+'</select></div><div class="field" id="driverTrailer2Field" hidden><label for="driverTrailer2">Placa da segunda carreta *</label><select id="driverTrailer2"><option value="">Selecione a segunda carreta</option>'+options(trailers,driverTrailer2Id)+'</select></div>':'')+'</div><p class="form-hint">'+(!trucks.length?'Nenhum caminhão disponível. Solicite o cadastro à administração.':needsTrailer&&!trailers.length?'Nenhuma carreta cadastrada e disponível. Solicite seu cadastro à administração.':'As placas vêm do cadastro de veículos. Confirme as escolhas para salvá-las no seu login.')+'</p><button id="confirmDriverVehicles" class="small-primary">Confirmar '+(needsTrailer?'caminhão e carreta':'caminhão')+'</button><p id="driverSelectionError" class="login-error" role="alert"></p></section>'+
         (ready ? '<div class="stats-grid driver-stats"><div class="stat-card"><div class="stat-copy"><span>Abastecimentos</span><strong>'+formatBRL(fuel)+'</strong></div></div><div class="stat-card"><div class="stat-copy"><span>Média diesel</span><strong>'+(average===null?'—':number(average)+' km/L')+'</strong></div></div><div class="stat-card"><div class="stat-copy"><span>Média ARLA</span><strong>'+(vehicleArlaAverage===null?'—':number(vehicleArlaAverage)+' km/L')+'</strong></div></div><div class="stat-card"><div class="stat-copy"><span>Manutenção</span><strong>'+formatBRL(maintenance)+'</strong></div></div><div class="stat-card"><div class="stat-copy"><span>Faturamento</span><strong>'+formatBRL(revenue)+'</strong></div></div></div><p class="form-hint">Média da placa: diferença de hodômetro entre os dois últimos abastecimentos dividida pelos litros do último. Manutenção e outros lançamentos não entram no cálculo. Diesel e ARLA usam seus próprios abastecimentos; tanque cheio não é obrigatório. '+(canAccess('vehicles')?'Histórico completo do veículo.':'Resumo dos seus lançamentos neste veículo.')+'</p><div class="section-title"><h2>Lançamentos</h2><button class="small-primary" id="newFleetEntry">Novo lançamento</button></div><p class="form-hint">Saldo dos lançamentos: '+formatBRL(revenue-fuel-maintenance-otherCosts)+' (faturamento menos todos os gastos lançados, incluindo outros gastos: '+formatBRL(otherCosts)+').</p><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Hodômetro</th><th>Combustível</th><th>Valor</th><th>Descrição</th><th>Ações</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7">Nenhum lançamento para esta placa.</td></tr>')+'</tbody></table></div></div>' : '<div class="table-card"><div class="empty-state"><strong>Selecione e confirme as placas acima</strong><span>Depois escolha o tipo de lançamento.</span></div></div>');
         const invalidate=()=>{if($('#newFleetEntry'))$('#newFleetEntry').disabled=true;$('#driverSelectionError').textContent='Confirme as novas placas antes de registrar lançamentos.';};
-        $('#driverPlate').onchange=invalidate;
+        const syncSecondTrailer=()=>{if(!$('#driverTrailer2'))return;const required=driverNeedsTwoTrailers($('#driverPlate').value);$('#driverTrailer2Field').hidden=!required;$('#driverTrailer2').required=required;$('#driverTrailer2').disabled=!required;if(!required)$('#driverTrailer2').value='';};
+        $('#driverPlate').onchange=()=>{syncSecondTrailer();invalidate();};syncSecondTrailer();
+        if($('#driverTrailer2'))$('#driverTrailer2').onchange=invalidate;
         if($('#driverTrailer'))$('#driverTrailer').onchange=invalidate;
         $('#confirmDriverVehicles').onclick=async()=>{
-          const id=$('#driverPlate').value, trailer=needsTrailer?$('#driverTrailer').value:null;
+          const id=$('#driverPlate').value, trailer=needsTrailer?$('#driverTrailer').value:null,trailer2=driverNeedsTwoTrailers(id)?$('#driverTrailer2').value:null;
           if(!id || (needsTrailer&&!trailer)){ $('#driverSelectionError').textContent=needsTrailer?'Selecione caminhão e carreta.':'Selecione o caminhão.';return;}
+          if(driverNeedsTwoTrailers(id)&&(!trailer2||trailer2===trailer)){$('#driverSelectionError').textContent='O cavalo 6x4 exige duas carretas com placas diferentes.';return;}
           const button=$('#confirmDriverVehicles');button.disabled=true;
           try{
             const client=await getSupabase();
-            const result=await client.from('driver_vehicle_selection').upsert({user_id:authUser.id,vehicle_id:id,trailer_id:trailer,updated_at:new Date().toISOString()});
+            const result=await client.from('driver_vehicle_selection').upsert({user_id:authUser.id,vehicle_id:id,trailer_id:trailer,trailer2_id:trailer2,updated_at:new Date().toISOString()});
             if(result.error)throw result.error;
-            driverVehicleId=id;driverTrailerId=trailer||'';
+            driverVehicleId=id;driverTrailerId=trailer||'';driverTrailer2Id=trailer2||'';
             showToast('Placas confirmadas.');await renderDriver();
           }catch(error){$('#driverSelectionError').textContent=authErrorMessage(error);button.disabled=false;}
         };
@@ -1260,12 +1267,13 @@
       }
       function openFleetEntry(entry=null) {
         if (driverJob === 'Carreteiro' && !driverTrailerId) { showToast('Selecione e confirme a carreta.'); return; }
+        if(!entry&&driverNeedsTwoTrailers(driverVehicleId)&&(!driverTrailer2Id||driverTrailer2Id===driverTrailerId)){showToast('Confirme as duas carretas do cavalo 6x4.');return;}
         const vehicleId=driverVehicleId;
         const vehicle=driverVehicles.find(v=>v.id===vehicleId);
         const today = new Date(); today.setMinutes(today.getMinutes()-today.getTimezoneOffset());
         const date=today.toISOString().slice(0,10);
         const field=(id,label,type,value,extra='')=>'<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" name="'+id+'" type="'+type+'" value="'+safe(value??'')+'" '+extra+'></div>';
-        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="fleetEntryTitle"><div class="modal-head"><div><h2 id="fleetEntryTitle">'+(entry?'Editar':'Novo')+' lançamento</h2><p>Caminhão '+safe(vehicle?.plate)+(driverTrailerId?' · Carreta '+safe(driverVehicles.find(v=>v.id===driverTrailerId)?.plate || ''):'')+'</p></div><button class="close-button" data-action="close-modal" type="button" aria-label="Fechar">'+icons.close+'</button></div><form id="fleetEntryForm"><div class="form-row"><div class="field"><label for="fleetKind">Tipo *</label><select id="fleetKind" name="fleetKind">'+Object.entries(fleetKinds).map(([key,label])=>'<option value="'+key+'" '+(entry?.kind===key?'selected':'')+'>'+label+'</option>').join('')+'</select></div>'+field('fleetDate','Data *','date',entry?.entry_date||date,'required max="'+date+'"')+'</div><div class="form-row">'+field('fleetOdometer','Hodômetro (km) *','number',entry?.odometer,'required min="0" step="0.1"')+field('fleetAmount','Valor total (R$) *','number',entry?Number(entry.amount)-Number(entry.arla_amount||0):'','required min="0.01" step="0.01"')+'</div><div id="fleetFuelFields" class="form-row">'+field('fleetLiters','Litros de diesel *','number',entry?.liters,'min="0.001" step="0.001"')+'<div class="field"><label for="fleetFull">Tanque de diesel cheio?</label><select id="fleetFull" name="fleetFull"><option value="false">Não, abastecimento parcial</option><option value="true" '+(entry?.full_tank?'selected':'')+'>Sim, tanque cheio</option></select></div></div>'+fleetArlaFields('fleet',entry)+fleetSupplierField('fleetDescription',entry?.description||'')+'<p class="form-hint">No faturamento, registre o valor do frete e identifique a viagem. Na manutenção, informe o serviço ou peça. Use a leitura do hodômetro no momento do lançamento.</p><p id="fleetFormError" class="login-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit">Salvar lançamento</button></div></form></section></div>';
+        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal access-modal compact-form" role="dialog" aria-modal="true" aria-labelledby="fleetEntryTitle"><div class="modal-head"><div><h2 id="fleetEntryTitle">'+(entry?'Editar':'Novo')+' lançamento</h2><p>Caminhão '+safe(vehicle?.plate)+(driverTrailerId?' · Carreta '+safe(driverVehicles.find(v=>v.id===driverTrailerId)?.plate || ''):'')+(driverTrailer2Id?' · Segunda carreta '+safe(driverVehicles.find(v=>v.id===driverTrailer2Id)?.plate||''):'')+'</p></div><button class="close-button" data-action="close-modal" type="button" aria-label="Fechar">'+icons.close+'</button></div><form id="fleetEntryForm"><div class="form-row"><div class="field"><label for="fleetKind">Tipo *</label><select id="fleetKind" name="fleetKind">'+Object.entries(fleetKinds).map(([key,label])=>'<option value="'+key+'" '+(entry?.kind===key?'selected':'')+'>'+label+'</option>').join('')+'</select></div>'+field('fleetDate','Data *','date',entry?.entry_date||date,'required max="'+date+'"')+'</div><div class="form-row">'+field('fleetOdometer','Hodômetro (km) *','number',entry?.odometer,'required min="0" step="0.1"')+field('fleetAmount','Valor total (R$) *','number',entry?Number(entry.amount)-Number(entry.arla_amount||0):'','required min="0.01" step="0.01"')+'</div><div id="fleetFuelFields" class="form-row">'+field('fleetLiters','Litros de diesel *','number',entry?.liters,'min="0.001" step="0.001"')+'<div class="field"><label for="fleetFull">Tanque de diesel cheio?</label><select id="fleetFull" name="fleetFull"><option value="false">Não, abastecimento parcial</option><option value="true" '+(entry?.full_tank?'selected':'')+'>Sim, tanque cheio</option></select></div></div>'+fleetArlaFields('fleet',entry)+fleetSupplierField('fleetDescription',entry?.description||'')+'<p class="form-hint">No faturamento, registre o valor do frete e identifique a viagem. Na manutenção, informe o serviço ou peça. Use a leitura do hodômetro no momento do lançamento.</p><p id="fleetFormError" class="login-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit">Salvar lançamento</button></div></form></section></div>';
         const arla=bindFleetArla('fleet',entry);
         const toggle=()=>{const fuel=$('#fleetKind').value==='fuel';$('#fleetFuelFields').hidden=!fuel;$('#fleetFuelFields').style.display=fuel?'':'none';$('#fleetLiters').required=fuel;arla.update();};
         $('#fleetKind').onchange=toggle;toggle();
@@ -1273,7 +1281,7 @@
           event.preventDefault();
           const button=event.currentTarget.querySelector('[type="submit"]');button.disabled=true;
           const kind=$('#fleetKind').value;
-          const payload={vehicle_id:vehicleId,trailer_id:entry?.trailer_id || (entry ? null : driverTrailerId || null),user_id:entry?.user_id||authUser.id,kind,entry_date:$('#fleetDate').value,odometer:Number($('#fleetOdometer').value),...arla.payload(),liters:kind==='fuel'?Number($('#fleetLiters').value):null,full_tank:kind==='fuel'&&$('#fleetFull').value==='true',description:$('#fleetDescription').value.trim()};
+          const payload={vehicle_id:vehicleId,trailer_id:entry?.trailer_id || (entry ? null : driverTrailerId || null),trailer2_id:entry?entry.trailer2_id||null:driverTrailer2Id||null,user_id:entry?.user_id||authUser.id,kind,entry_date:$('#fleetDate').value,odometer:Number($('#fleetOdometer').value),...arla.payload(),liters:kind==='fuel'?Number($('#fleetLiters').value):null,full_tank:kind==='fuel'&&$('#fleetFull').value==='true',description:$('#fleetDescription').value.trim()};
           try{
             const client=await getSupabase();
             const result=entry?await client.from('fleet_entries').update(payload).eq('id',entry.id).select('id'):await client.from('fleet_entries').insert(payload).select('id');
@@ -1921,11 +1929,11 @@
         }
         return metrics;
       }
-      function openFleetLinkPicker() {
+      function openFleetLinkPicker(driverId='') {
         if(!canAccess('vehicles'))return;
-        const trucks=readRecords('vehicles').filter(v=>v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v)).sort(compareVehiclePlates);
-        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="fleetLinkTitle"><div class="modal-head"><h2 id="fleetLinkTitle">Atrelar veículo / motorista</h2><button type="button" class="close-button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="fleetLinkPicker"><div class="field"><label for="fleetLinkVehicle">Veículo *</label><select id="fleetLinkVehicle" required><option value="">Selecione a placa</option>'+trucks.map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate||'Sem placa')+'</option>').join('')+'</select></div><div class="modal-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button type="submit" class="small-primary">Selecionar motoristas</button></div></form></section></div>';
-        $('#fleetLinkPicker').onsubmit=event=>{event.preventDefault();const id=$('#fleetLinkVehicle').value;if(trucks.some(v=>v.id===id))openVehicleDriversModal(id,renderVehicleCosts);};
+        const trucks=readRecords('vehicles').filter(v=>v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v)&&(!driverId||!v.driverIds?.length)).sort(compareVehiclePlates);
+        $('#modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="fleetLinkTitle"><div class="modal-head"><h2 id="fleetLinkTitle">Atrelar veículo / motorista</h2><button type="button" class="close-button" data-action="close-modal" aria-label="Fechar">'+icons.close+'</button></div><form id="fleetLinkPicker"><div class="field"><label for="fleetLinkVehicle">Veículo *</label><select id="fleetLinkVehicle" required><option value="">Selecione a placa</option>'+trucks.map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate||'Sem placa')+'</option>').join('')+'</select></div><div class="modal-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button type="submit" class="small-primary">Atrelar motorista</button></div></form></section></div>';
+        $('#fleetLinkPicker').onsubmit=event=>{event.preventDefault();const id=$('#fleetLinkVehicle').value;if(trucks.some(v=>v.id===id))openVehicleDriversModal(id,renderVehicleCosts,driverId);};
         bindModalClose();
       }
       let fleetQuickMonth = '';
@@ -2059,7 +2067,7 @@
                 rows.filter(r=>fleetDriverKey(r)===g.key).forEach(r=>ids.add(r.vehicle_id));
                 const available=vehicles.filter(v=>ids.has(v.id)&&v.vehicleType!=='trailers'&&v.category!=='Carreta'&&canAccessFleetVehicle(v));
                 const linked=vehicles.some(v=>motorizedVehicle(v)&&Array.isArray(v.driverIds)&&v.driverIds.includes(g.key));
-                const plates=available.map(v=>'<div class="employee-row-actions" style="margin-bottom:6px"><span>'+safe(v.plate||'Sem placa')+'</span></div>').join('')||safe([...g.plates].join(' · ')||'Sem placa vinculada');
+                const plates=available.map(v=>'<div class="employee-row-actions" style="margin-bottom:6px"><span>'+safe(v.plate||'Sem placa')+'</span>'+((linkedTrailerPlates(v).length?linkedTrailerPlates(v).join(' · '):rows.find(r=>r.vehicle_id===v.id)?.trailerPlate)?'<span class="table-sub">Carretas: '+safe(linkedTrailerPlates(v).length?linkedTrailerPlates(v).join(' · '):rows.find(r=>r.vehicle_id===v.id)?.trailerPlate)+'</span>':'')+'</div>').join('')||safe([...g.plates].join(' · ')||'Sem placa vinculada');
                 return plates+(linked?'':'<button type="button" class="row-action edit" data-fleet-unlinked="'+safe(g.key)+'">Atrelar</button>');
               };
               const moneyCells=g=>Object.keys(fleetKinds).map(k=>'<td>'+formatBRL(g.totals[k]||0)+'</td>').join('')+'<td>'+formatBRL(g.cost)+'</td><td>'+formatBRL(g.revenue-g.cost)+'</td>';
@@ -2082,7 +2090,7 @@
               if(vehicleLink){fleetCostsPage={mode:'vehicle',vehicleId:vehicleLink.dataset.fleetVehicle};await renderVehicleCosts();return;}
               if(attach){openVehicleDriversModal(attach.dataset.fleetLink,renderVehicleCosts);return;}
               const unlinked=event.target.closest('[data-fleet-unlinked]');
-              if(unlinked){openFleetLinkPicker();return;}
+              if(unlinked){openFleetLinkPicker(unlinked.dataset.fleetUnlinked);return;}
               const expand=event.target.closest('[data-fleet-expand]');
               if(expand){const key=expand.dataset.fleetExpand;if(expandedDrivers.has(key))expandedDrivers.delete(key);else expandedDrivers.add(key);update();return;}
               const driverLink=event.target.closest('[data-fleet-driver]');
@@ -2465,13 +2473,14 @@
       function linkedTrailerPlates(record) {
         return (Array.isArray(record.trailerIds) ? record.trailerIds : []).map(id => readRecords('vehicles').find(vehicle => vehicle.id === id)?.plate || 'Carreta não disponível');
       }
-      function openVehicleDriversModal(id,onSaved=null) {
+      function openVehicleDriversModal(id,onSaved=null,fixedDriverId='') {
         if (!canAccess('vehicles')) { showToast('Seu login não pode editar veículos.'); return; }
         const record = readRecords('vehicles').find(vehicle => vehicle.id === id);
         if (!record) return;
-        const selected = Array.isArray(record.driverIds) ? record.driverIds : [];
+        const selected = fixedDriverId?[fixedDriverId]:(Array.isArray(record.driverIds) ? record.driverIds : []);
         if(!motorizedVehicle(record)){showToast('Atrele o motorista ao caminhão; as carretas pertencem ao conjunto.');return;}
-        const available = availableSingleDrivers(record,readRecords('vehicles'),vehicleDriverNames);
+        const available = availableSingleDrivers(record,readRecords('vehicles'),vehicleDriverNames).filter(d=>!fixedDriverId||d.id===fixedDriverId);
+        if(fixedDriverId&&!available.length){showToast('Esse motorista já foi vinculado ou não está disponível. Atualize a lista.');return;}
         const removed = [];
         const trailerCount = vehicleTrailerCount(record);
         const trailers = readRecords('vehicles').filter(vehicle => vehicle.id !== id && (vehicle.vehicleType === 'trailers' || vehicle.category === 'Carreta')).sort(compareVehiclePlates);
@@ -2486,6 +2495,7 @@
           $('#linkedTrailerFields').style.display = enabled ? '' : 'none';
           Array.from(form.querySelectorAll('[name="trailerId"]')).forEach(select => { select.disabled = !enabled; select.required = enabled; });
         };
+        if(fixedDriverId){const first=form.querySelector('[name="driverId"][value=""]');if(first)first.closest('label').remove();form.querySelector('legend').textContent='Motorista desta linha';form.querySelector('[name="driverId"]').style.display='none';}
         form.onchange = event => {
           if (event.target.name === 'driverId') toggleTrailers();
           if (event.target.name === 'trailerId') Array.from(form.querySelectorAll('[name="trailerId"]')).forEach(select => select.setCustomValidity(''));
@@ -3314,7 +3324,8 @@
         const licenseOptions = licenses.map(license => `<option value="${license}" ${String(record.license || '') === license ? 'selected' : ''}>${license || 'Não se aplica'}</option>`).join('');
         const isPending = selfRegistration || record.status === 'Pendente de finalização';
         const needsRegistrationPlate=selfRegistration&&['Motorista','Carreteiro'].includes(record.role);
-        let registrationPlateReady=!needsRegistrationPlate;
+        let registrationPlateReady=!needsRegistrationPlate,registrationVehicleOptions=[];
+        const registrationNeedsTwo=()=>record.role==='Carreteiro'&&String(registrationVehicleOptions.find(v=>v.id===$('#registrationPlate').value)?.category||'').replace(/\s/g,'').toLowerCase().includes('6x4');
         const editableAccess = !selfRegistration && !archived && canViewOverview() && Boolean(record.userId);
         let accessModulesLoaded = !editableAccess;
         const accessModuleLabels = {driver:'Motorista',vehicles:'Veículos',employees:'Funcionários',accessRequests:'Solicitações de acesso',finance:'Financeiro',conferente:'Conferente',operacional:'Operacional',information:'Informações',usefulContacts:'Contatos úteis'};
@@ -3336,14 +3347,15 @@
             <div class="form-section-label">Habilitação e documento</div>
             <div class="form-row"><div class="field"><label for="editEmployeeLicense">Categoria da CNH</label><select id="editEmployeeLicense" name="license">${licenseOptions}</select></div><div class="field file-field"><label for="editEmployeeDocument">CNH ou documento ${isPending ? '*' : ''}</label><input id="editEmployeeDocument" ${isPending && !record.document?.key ? 'required' : ''} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"><p id="editEmployeeDocumentStatus" class="file-status">${record.document ? `Arquivo atual: ${safe(record.document.name)}` : 'Nenhum documento anexado.'}</p></div></div>
             ${needsRegistrationPlate?'<div class="field"><label for="registrationPlate">Placa do caminhão *</label><select id="registrationPlate" name="vehicle_id" required disabled><option value="">Carregando placas…</option></select><p id="registrationPlateStatus" role="status"></p><button type="button" class="secondary-button" id="retryRegistrationPlates">Atualizar placas</button></div>':''}
-            ${needsRegistrationPlate&&record.role==='Carreteiro'?'<div class="field"><label for="registrationTrailer">Placa da carreta *</label><select id="registrationTrailer" required disabled><option value="">Carregando carretas…</option></select></div>':''}
+            ${needsRegistrationPlate&&record.role==='Carreteiro'?'<div class="field"><label for="registrationTrailer">Placa da carreta *</label><select id="registrationTrailer" required disabled><option value="">Carregando carretas…</option></select></div><div class="field" id="registrationTrailer2Field" hidden><label for="registrationTrailer2">Placa da segunda carreta *</label><select id="registrationTrailer2" disabled><option value="">Selecione a segunda carreta</option></select></div>':''}
             ${accessFields}
             ${archived?`<div class="field"><label for="editDismissalReason">Motivo da demissão *</label><textarea id="editDismissalReason" required minlength="3" maxlength="1000">${safe(record.dismissalReason||'')}</textarea></div>`:''}
             <div class="modal-actions">${!selfRegistration&&!archived&&record.userId!==activeUser?.id?`<button id="dismissEmployeeButton" class="row-action delete" type="button">Dispensado</button>`:''}<button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="small-primary" type="submit" name="employeeAction" value="save">Salvar alterações</button>${isPending ? `<button class="small-primary" type="submit" name="employeeAction" value="finalize">Finalizar cadastro</button>` : ''}</div>
           </form></section></div>`;
         if(needsRegistrationPlate){
           const plateSelect=$('#registrationPlate'),plateStatus=$('#registrationPlateStatus');
-          const loadPlates=async()=>{registrationPlateReady=false;plateSelect.disabled=true;plateStatus.textContent='Carregando placas disponíveis…';try{const client=await getSupabase();const {data,error}=await client.rpc('registration_vehicle_options');if(error)throw error;if($('#registrationPlate')!==plateSelect)return;plateSelect.innerHTML='<option value="">Selecione sua placa</option>'+(data||[]).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');if(record.role==='Carreteiro'){const trailers=await client.rpc('driver_vehicle_options_v2');if(trailers.error)throw trailers.error;if($('#registrationPlate')!==plateSelect)return;$('#registrationTrailer').innerHTML='<option value="">Selecione a carreta</option>'+(trailers.data||[]).filter(v=>v.is_trailer).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');$('#registrationTrailer').disabled=false;}plateSelect.disabled=false;registrationPlateReady=true;plateStatus.textContent=data?.length?'Selecione a placa para finalizar seu cadastro.':'Nenhum veículo disponível. Solicite o atrelamento à Frota.';}catch(error){plateStatus.textContent=authErrorMessage(error,'Não foi possível carregar as placas.');}};
+          const syncRegistrationSecond=()=>{if(record.role!=='Carreteiro')return;const needed=registrationNeedsTwo();$('#registrationTrailer2Field').hidden=!needed;$('#registrationTrailer2').disabled=!needed;$('#registrationTrailer2').required=needed;if(!needed)$('#registrationTrailer2').value='';};plateSelect.onchange=syncRegistrationSecond;
+          const loadPlates=async()=>{registrationPlateReady=false;plateSelect.disabled=true;plateStatus.textContent='Carregando placas disponíveis…';try{const client=await getSupabase();const {data,error}=await client.rpc('registration_vehicle_options');if(error)throw error;if($('#registrationPlate')!==plateSelect)return;plateSelect.innerHTML='<option value="">Selecione sua placa</option>'+(data||[]).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');if(record.role==='Carreteiro'){const trailers=await client.rpc('driver_vehicle_options_v2');if(trailers.error)throw trailers.error;if($('#registrationPlate')!==plateSelect)return;$('#registrationTrailer').innerHTML='<option value="">Selecione a carreta</option>'+(trailers.data||[]).filter(v=>v.is_trailer).map(v=>'<option value="'+safe(v.id)+'">'+safe(v.plate)+'</option>').join('');registrationVehicleOptions=trailers.data||[];$('#registrationTrailer2').innerHTML=$('#registrationTrailer').innerHTML;$('#registrationTrailer').disabled=false;syncRegistrationSecond();}plateSelect.disabled=false;registrationPlateReady=true;plateStatus.textContent=data?.length?'Selecione a placa para finalizar seu cadastro.':'Nenhum veículo disponível. Solicite o atrelamento à Frota.';}catch(error){plateStatus.textContent=authErrorMessage(error,'Não foi possível carregar as placas.');}};
           $('#retryRegistrationPlates').onclick=loadPlates;loadPlates();
         }
         if($('#dismissEmployeeButton'))$('#dismissEmployeeButton').onclick=()=>openEmployeeDismissalForm(record);
@@ -3385,7 +3397,7 @@
           Object.assign(employeeFields, normalizeEmployeeNames(employeeFields));
           const finalize = selfRegistration || event.submitter?.value === 'finalize';
           if(needsRegistrationPlate){if(!registrationPlateReady||!$('#registrationPlate').value){showToast('Selecione a placa do caminhão para finalizar o cadastro.');return;}employeeFields.vehicle_id=$('#registrationPlate').value;}
-          if(needsRegistrationPlate&&record.role==='Carreteiro'){if(!$('#registrationTrailer').value){showToast('Selecione também a placa da carreta.');return;}employeeFields.trailer_id=$('#registrationTrailer').value;}
+          if(needsRegistrationPlate&&record.role==='Carreteiro'){if(!$('#registrationTrailer').value){showToast('Selecione também a placa da carreta.');return;}employeeFields.trailer_id=$('#registrationTrailer').value;if(registrationNeedsTwo()){const second=$('#registrationTrailer2').value;if(!second||second===employeeFields.trailer_id){showToast('O cavalo 6x4 exige duas carretas com placas diferentes.');return;}employeeFields.trailer2_id=second;}}
           const existing = current.find(item => item.id === id);
           if (!existing) return;
           let documentData = existing.document || null;
